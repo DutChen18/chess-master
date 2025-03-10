@@ -2,6 +2,9 @@ use std::fmt;
 use std::mem;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
+use crate::shift::Offset;
+use crate::shift::Shift;
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct CastlingRights(u8);
 
@@ -19,6 +22,20 @@ impl CastlingRights {
 
     pub fn has(self, other: Self) -> bool {
         self & other != Self::NONE
+    }
+
+    pub fn has_short(self, color: Color) -> bool {
+        self.has(match color {
+            Color::White => CastlingRights::WHITE_SHORT,
+            Color::Black => CastlingRights::BLACK_SHORT,
+        })
+    }
+
+    pub fn has_long(self, color: Color) -> bool {
+        self.has(match color {
+            Color::White => CastlingRights::WHITE_LONG,
+            Color::Black => CastlingRights::BLACK_LONG,
+        })
     }
 
     pub fn from_str(s: &str) -> Self {
@@ -157,6 +174,72 @@ define_enum! {
         A6, B6, C6, D6, E6, F6, G6, H6,
         A7, B7, C7, D7, E7, F7, G7, H7,
         A8, B8, C8, D8, E8, F8, G8, H8,
+    }
+}
+
+pub trait ConstColor {
+    type Opponent: ConstColor;
+
+    fn color() -> Color;
+
+    fn opponent() -> Color {
+        !Self::color()
+    }
+
+    fn up() -> impl Shift;
+    fn up_up() -> impl Shift;
+    fn up_left() -> impl Shift;
+    fn up_right() -> impl Shift;
+}
+
+pub struct ConstWhite;
+pub struct ConstBlack;
+
+impl ConstColor for ConstWhite {
+    type Opponent = ConstBlack;
+
+    fn color() -> Color {
+        Color::White
+    }
+
+    fn up() -> impl Shift {
+        Offset::<0, 1>
+    }
+
+    fn up_up() -> impl Shift {
+        Offset::<0, 2>
+    }
+
+    fn up_left() -> impl Shift {
+        Offset::<-1, 1>
+    }
+
+    fn up_right() -> impl Shift {
+        Offset::<1, 1>
+    }
+}
+
+impl ConstColor for ConstBlack {
+    type Opponent = ConstWhite;
+
+    fn color() -> Color {
+        Color::Black
+    }
+
+    fn up() -> impl Shift {
+        Offset::<0, -1>
+    }
+
+    fn up_up() -> impl Shift {
+        Offset::<0, -2>
+    }
+
+    fn up_left() -> impl Shift {
+        Offset::<-1, -1>
+    }
+
+    fn up_right() -> impl Shift {
+        Offset::<1, -1>
     }
 }
 
@@ -306,6 +389,13 @@ impl Rank {
             Self::_8 => '8',
         }
     }
+
+    pub fn r#for(self, color: Color) -> Self {
+        match color {
+            Color::White => self,
+            Color::Black => unsafe { mem::transmute(self as u8 ^ 7) },
+        }
+    }
 }
 
 impl Square {
@@ -326,6 +416,13 @@ impl Square {
         let rank = Rank::from_str(&s[1..2]);
 
         Self::new(file, rank)
+    }
+
+    pub fn r#for(self, color: Color) -> Self {
+        match color {
+            Color::White => self,
+            Color::Black => unsafe { mem::transmute(self as u8 ^ 56) },
+        }
     }
 }
 

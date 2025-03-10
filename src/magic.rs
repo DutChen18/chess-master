@@ -1,5 +1,4 @@
 use std::arch::x86_64;
-use std::sync::LazyLock;
 
 use crate::bitboard::Bitboard;
 use crate::shift;
@@ -35,8 +34,8 @@ impl Magic {
         let mut bitboard = Bitboard(0);
 
         loop {
-            bitboard = (bitboard - mask) & mask;
             bitboards.push((ray)(square.into(), !bitboard));
+            bitboard = (bitboard - mask) & mask;
 
             if bitboard == Bitboard(0) {
                 break;
@@ -48,8 +47,29 @@ impl Magic {
 }
 
 impl MagicTable {
-    pub fn get() -> &'static Self {
-        &*MAGIC_TABLE
+    pub fn new() -> Self {
+        let mut bitboards = Vec::new();
+
+        let mut bishop = [Magic {
+            index: 0,
+            mask: Bitboard(0),
+        }; 64];
+
+        let mut rook = [Magic {
+            index: 0,
+            mask: Bitboard(0),
+        }; 64];
+
+        for square in Square::iter() {
+            *square.index_mut(&mut bishop) = Magic::new(&mut bitboards, square, shift::bishop_ray);
+            *square.index_mut(&mut rook) = Magic::new(&mut bitboards, square, shift::rook_ray);
+        }
+
+        Self {
+            bitboards,
+            bishop,
+            rook,
+        }
     }
 
     pub fn bishop(&self, square: Square, occupied: Bitboard) -> Bitboard {
@@ -66,28 +86,3 @@ impl MagicTable {
         self.bitboards[magic.index + index]
     }
 }
-
-static MAGIC_TABLE: LazyLock<MagicTable> = LazyLock::new(|| {
-    let mut bitboards = Vec::new();
-
-    let mut bishop = [Magic {
-        index: 0,
-        mask: Bitboard(0),
-    }; 64];
-
-    let mut rook = [Magic {
-        index: 0,
-        mask: Bitboard(0),
-    }; 64];
-
-    for square in Square::iter() {
-        *square.index_mut(&mut bishop) = Magic::new(&mut bitboards, square, shift::bishop_ray);
-        *square.index_mut(&mut rook) = Magic::new(&mut bitboards, square, shift::rook_ray);
-    }
-
-    MagicTable {
-        bitboards,
-        bishop,
-        rook,
-    }
-});

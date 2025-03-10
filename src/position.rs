@@ -1,7 +1,6 @@
-use crate::board::Board;
+use crate::{board::Board, global::GlobalData};
 use crate::r#move::Move;
 use crate::types::{CastlingRights, Color, File, Kind, Piece, Rank, Square};
-use crate::zobrist::Zobrist;
 
 use std::ops::Deref;
 
@@ -18,6 +17,7 @@ pub struct UndoState {
     capture: Option<Piece>,
 }
 
+#[derive(Clone)]
 pub struct Position {
     board: Board,
     ply: usize,
@@ -32,7 +32,7 @@ impl Position {
     }
 
     pub fn parse(fen: &[&str]) -> Self {
-        let zobrist = Zobrist::get();
+        let zobrist = GlobalData::get().zobrist();
         let mut board = Board::empty();
         let mut hash = 0;
 
@@ -91,6 +91,45 @@ impl Position {
         }
     }
 
+    pub fn fen(&self) -> String {
+        let fen = String::new();
+
+        let mut empty = 0;
+
+        for rank in Rank::iter().rev() {
+            for file in File::iter() {
+                if let Some(piece) = self.board.get(Square::new(file, rank)) {
+                    if empty > 0 {
+                        print!("{empty}");
+                        empty = 0;
+                    }
+
+                    print!("{}", piece.kind());
+                } else {
+                    empty += 1;
+                }                
+            }
+        }
+
+        fen
+    }
+
+    pub fn king_square(&self, color: Color) -> Square {
+        self.color_kind_bb(color, Kind::King).square().unwrap()
+    }
+
+    pub fn state(&self) -> &State {
+        self.states.last().unwrap()
+    }
+
+    pub fn castling_rights(&self) -> CastlingRights {
+        self.state().castling_rights
+    }
+
+    pub fn en_passant(&self) -> Option<Square> {
+        self.state().en_passant
+    }
+
     pub fn turn(&self) -> Color {
         match self.ply & 1 {
             0 => Color::White,
@@ -99,18 +138,15 @@ impl Position {
         }
     }
 
-    // TODO: set zobrist castling rights
     pub fn make(&mut self, r#move: Move) -> UndoState {
-        let zobrist = Zobrist::get();
+        let zobrist = GlobalData::get().zobrist();
         let mut state = self.states.last().unwrap().clone();
         let piece = self.board.get(r#move.from()).unwrap();
         let mut capture = self.board.get(r#move.to());
 
-        self.ply += 1;
         self.board.set(r#move.from(), None);
         self.board.set(r#move.to(), Some(piece));
 
-        state.hash ^= zobrist.color();
         state.hash ^= zobrist.piece(piece, r#move.from());
         state.hash ^= zobrist.piece(piece, r#move.to());
 
@@ -133,18 +169,21 @@ impl Position {
         if piece.kind() == Kind::King {
             let rook = Piece::new(piece.color(), Kind::Rook);
 
-            // TODO: zobrist castling rights
             match self.turn() {
                 Color::White => {
-                    if state.castling_rights.has(CastlingRights::WHITE_SHORT) && r#move.to() == Square::G1 {
+                    if state.castling_rights.has(CastlingRights::WHITE_SHORT)
+                        && r#move.to() == Square::G1
+                    {
                         self.board.set(Square::H1, None);
                         self.board.set(Square::F1, Some(rook));
 
                         state.hash ^= zobrist.piece(rook, Square::H1);
                         state.hash ^= zobrist.piece(rook, Square::F1);
                     }
-                    
-                    if state.castling_rights.has(CastlingRights::WHITE_LONG) && r#move.to() == Square::C1 {
+
+                    if state.castling_rights.has(CastlingRights::WHITE_LONG)
+                        && r#move.to() == Square::C1
+                    {
                         self.board.set(Square::A1, None);
                         self.board.set(Square::D1, Some(rook));
 
@@ -153,15 +192,19 @@ impl Position {
                     }
                 }
                 Color::Black => {
-                    if state.castling_rights.has(CastlingRights::BLACK_SHORT) && r#move.to() == Square::G8 {
+                    if state.castling_rights.has(CastlingRights::BLACK_SHORT)
+                        && r#move.to() == Square::G8
+                    {
                         self.board.set(Square::H8, None);
                         self.board.set(Square::F8, Some(rook));
 
                         state.hash ^= zobrist.piece(rook, Square::H8);
                         state.hash ^= zobrist.piece(rook, Square::F8);
                     }
-                    
-                    if state.castling_rights.has(CastlingRights::BLACK_LONG) && r#move.to() == Square::C8 {
+
+                    if state.castling_rights.has(CastlingRights::BLACK_LONG)
+                        && r#move.to() == Square::C8
+                    {
                         self.board.set(Square::A8, None);
                         self.board.set(Square::D8, Some(rook));
 
@@ -187,7 +230,7 @@ impl Position {
         if let Some(ep) = state.en_passant {
             state.hash ^= zobrist.en_passant(ep.file());
         }
-        
+
         state.halfmove_clock += 1;
         state.en_passant = None;
 
@@ -210,7 +253,7 @@ impl Position {
                 Color::Black => {
                     if r#move.from().rank() == Rank::_7 && r#move.to().rank() == Rank::_5 {
                         let ep = Square::new(r#move.from().file(), Rank::_6);
-                    
+
                         state.en_passant = Some(ep);
                         state.hash ^= zobrist.en_passant(ep.file());
                     }
@@ -231,7 +274,13 @@ impl Position {
             }
         }
         
-        self.states.push(state.clone());
+        self.ply += 1;
+
+        state.hash ^= zobrist.color();
+        state.hash ^= zobrist.castling_rights(self.states.last().unwrap().castling_rights);
+        state.hash ^= zobrist.castling_rights(state.castling_rights);
+
+        self.states.push(state);
 
         UndoState { capture, r#move }
     }
@@ -242,7 +291,7 @@ impl Position {
         let m = undo_state.r#move;
         let piece = self.board.get(m.to()).unwrap();
         let state = self.states.last().unwrap();
-            
+
         self.ply -= 1;
         self.board.set(m.from(), Some(piece));
         self.board.set(m.to(), None);
@@ -260,7 +309,8 @@ impl Position {
 
         // Undo promotion
         if m.kind() != None {
-            self.board.set(m.from(), Some(Piece::new(piece.color(), Kind::Pawn)));
+            self.board
+                .set(m.from(), Some(Piece::new(piece.color(), Kind::Pawn)));
         }
 
         // Corner rook if undoing castling
@@ -273,7 +323,7 @@ impl Position {
                         self.board.set(Square::H1, rook);
                         self.board.set(Square::F1, None);
                     }
-                    
+
                     if m.from() == Square::E1 && m.to() == Square::C1 {
                         self.board.set(Square::A1, rook);
                         self.board.set(Square::D1, None);
@@ -284,7 +334,7 @@ impl Position {
                         self.board.set(Square::H8, rook);
                         self.board.set(Square::F8, None);
                     }
-                    
+
                     if m.from() == Square::E8 && m.to() == Square::C8 {
                         self.board.set(Square::A8, rook);
                         self.board.set(Square::D8, None);
@@ -298,9 +348,11 @@ impl Position {
     pub fn evaluate(&self) -> i16 {
         let mut scores: [i16; 2] = [0, 0];
 
-        for opt in self.board.pieces() {
-            if let Some(piece) = opt {
-                *piece.color().index_mut(&mut scores) += piece.kind().value();
+        for color in Color::iter() {
+            for kind in Kind::iter() {
+                let bb = self.board.color_kind_bb(color, kind);
+
+                *color.index_mut(&mut scores) += bb.count() as i16 * kind.value();
             }
         }
 

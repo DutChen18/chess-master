@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::io::Write;
+
 use crate::position::Position;
 use crate::searchlimits::SearchLimits;
 use crate::r#move::Move;
@@ -25,11 +26,12 @@ impl Uci {
             let mut buffer = String::new();
 
             if let Ok(bytes) = std::io::stdin().read_line(&mut buffer) {
-                // EOF
                 if bytes == 0 {
                     break;
                 }
             }
+
+            eprint!("> {buffer}");
 
             let words: Vec<String> = buffer.split_whitespace().map(String::from).collect();
 
@@ -41,38 +43,57 @@ impl Uci {
                         // println!("option name OwnBook");
                         println!("uciok");
                     }
-                    "isready" => println!("readok"),
+                    "isready" => println!("readyok"),
                     "setoption" => todo!(),
                     "ucinewgame" => self.position = Position::new(),
                     "position" => self.position(&words[1..]),
                     "go" => self.go(&words[1..]),
                     "quit" => quit = true,
+                    "perft" => self.perft(&words[1..]),
                     _ => (),
                 }
             }
+
+            std::io::stdout().flush().unwrap();
         }
     }
 
-    pub fn position<'a>(&mut self, words: &[String]) {
+    pub fn position(&mut self, words: &[String]) {
         if let Some(pos) = words.first() {
             let fen: [&str; 6] = match pos.as_str() {
-                "fen" => words.iter().map(|s| s.as_str()).take_while(|&s| s != "moves").collect::<Vec<&str>>().try_into().unwrap(),
+                "fen" => words.iter().skip(1).map(|s| s.as_str()).take_while(|&s| s != "moves").collect::<Vec<&str>>().try_into().unwrap(),
                 "startpos" => Position::STARTPOS.split_whitespace().collect::<Vec<&str>>().try_into().unwrap(),
-                _ => return,
+                _ => panic!(),
             };
 
             self.position = Position::parse(&fen);
 
-            for m in words.iter().take_while(|&s| s != "moves").skip(1) {
+            for m in words.iter().skip_while(|&s| s != "moves").skip(1) {
                 self.position.make(Move::from_str(m));
             }
         }
     }
 
-    pub fn go<'a>(&self, words: &[String]) {
+    pub fn go(&mut self, words: &[String]) {
+        if let Some(command) = words.first() {
+            if command == "perft" {
+                return self.perft(words);
+            }
+        }
+
         let limits = SearchLimits::parse(words);
 
         println!("bestmove {}", Engine::search(&self.position, limits));
+    }
+
+    pub fn perft(&mut self, words: &[String]) {
+        if let Some(command) = words.first() {
+            if command == "perft" {
+                let depth = if let Some(s) = words.iter().nth(1) { s.parse().unwrap() } else { 1 };
+                
+                println!("Nodes searched: {}", Engine::perft(&mut self.position, depth, true));
+            }
+        }
     }
 }
 

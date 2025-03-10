@@ -38,9 +38,6 @@ impl Board {
         }
     }
 
-    pub fn pieces(&self) -> [Option<Piece>; 64] {
-        self.pieces
-    }
 
     pub fn color_bb(&self, color: Color) -> Bitboard {
         *color.index(&self.color_bb)
@@ -48,5 +45,25 @@ impl Board {
 
     pub fn kind_bb(&self, kind: Kind) -> Bitboard {
         *kind.index(&self.kind_bb)
+    }
+
+    pub fn color_kind_bb(&self, color: Color, kind: Kind) -> Bitboard {
+        self.color_bb(color) & self.kind_bb(kind)
+    }
+
+    pub fn piece_bb(&self, piece: Piece) -> Bitboard {
+        self.color_kind_bb(piece.color(), piece.kind())
+    }
+
+    pub fn occupied_bb(&self) -> Bitboard {
+        self.color_bb(Color::White) | self.color_bb(Color::Black)
+    }
+
+    pub fn bishop_queen_bb(&self, color: Color) -> Bitboard {
+        (self.kind_bb(Kind::Bishop) | self.kind_bb(Kind::Queen)) & self.color_bb(color)
+    }
+
+    pub fn rook_queen_bb(&self, color: Color) -> Bitboard {
+        (self.kind_bb(Kind::Rook) | self.kind_bb(Kind::Queen)) & self.color_bb(color)
     }
 }

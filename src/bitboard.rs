@@ -1,8 +1,8 @@
-use crate::types::{File, Rank, Square};
+use crate::types::{Color, File, Rank, Square};
 
 use std::ops::{
-    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
-    Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, MulAssign,
+    Neg, Not, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 
 use std::mem;
@@ -21,6 +21,15 @@ impl Bitboard {
     pub fn pop(&mut self) {
         self.0 &= self.0 - 1;
     }
+
+    pub fn r#for(self, color: Color) -> Bitboard {
+        match color {
+            Color::White => self,
+            Color::Black => Self(self.0.swap_bytes()),
+        }
+    }
+
+    // TODO: popcount
 }
 
 impl Iterator for Bitboard {
@@ -29,11 +38,35 @@ impl Iterator for Bitboard {
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.square();
 
-        self.pop();
+        if item.is_some() {
+            self.pop();
+        }
 
         item
     }
 }
+
+macro_rules! binary_wrapping_impl {
+    ($op:ident, $fn:ident, $op_assign:ident, $fn_assign:ident, $fn_wrapping:ident) => {
+        impl $op for Bitboard {
+            type Output = Self;
+
+            fn $fn(self, rhs: Self) -> Self::Output {
+                Self(self.0.$fn_wrapping(rhs.0))
+            }
+        }
+
+        impl $op_assign for Bitboard {
+            fn $fn_assign(&mut self, rhs: Self) {
+                *self = self.$fn(rhs);
+            }
+        }
+    };
+}
+
+binary_wrapping_impl!(Add, add, AddAssign, add_assign, wrapping_add);
+binary_wrapping_impl!(Sub, sub, SubAssign, sub_assign, wrapping_sub);
+binary_wrapping_impl!(Mul, mul, MulAssign, mul_assign, wrapping_mul);
 
 macro_rules! binary_impl {
     ($op:ident, $fn:ident, $op_assign:ident, $fn_assign:ident) => {
@@ -53,11 +86,6 @@ macro_rules! binary_impl {
     };
 }
 
-binary_impl!(Add, add, AddAssign, add_assign);
-binary_impl!(Sub, sub, SubAssign, sub_assign);
-binary_impl!(Mul, mul, MulAssign, mul_assign);
-binary_impl!(Div, div, DivAssign, div_assign);
-binary_impl!(Rem, rem, RemAssign, rem_assign);
 binary_impl!(BitAnd, bitand, BitAndAssign, bitand_assign);
 binary_impl!(BitOr, bitor, BitOrAssign, bitor_assign);
 binary_impl!(BitXor, bitxor, BitXorAssign, bitxor_assign);
