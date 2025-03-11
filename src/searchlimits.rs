@@ -58,7 +58,7 @@ impl SearchLimits {
 
     pub fn get_end_time(&self, color: Color) -> Instant {
         if let Some(movetime) = self.movetime {
-            return Instant::now() + movetime;
+            return Instant::now() + movetime.mul_f32(0.9);
         }
 
         Instant::now() + std::cmp::min(*color.index(&self.time) / 2, Duration::from_millis(100)) + *color.index(&self.inc)

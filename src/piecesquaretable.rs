@@ -1,7 +1,7 @@
-use crate::types::{Color, Kind, Piece, Square};
+use crate::types::{Color, Kind, Piece, Square, Phase};
 
 pub struct PieceSquareTable {
-    values: [[i16; 64]; Piece::COUNT],
+    values: [[[i16; 64]; Piece::COUNT]; Phase::COUNT],
 }
 
 impl PieceSquareTable {
@@ -40,6 +40,7 @@ impl PieceSquareTable {
         -10,  5,  0,  0,  0,  0,  5,-10,
         -20,-10,-10,-10,-10,-10,-10,-20,
     ];
+
     #[rustfmt::skip]
     const ROOK: [i16; 64] = [
           0,  0,  0,  0,  0,  0,  0,  0,
@@ -51,6 +52,7 @@ impl PieceSquareTable {
          -5,  0,  0,  0,  0,  0,  0, -5,
           0,  0,  0,  5,  5,  0,  0,  0
     ];
+
     #[rustfmt::skip]
     const QUEEN: [i16; 64] = [
         -20,-10,-10, -5, -5,-10,-10,-20,
@@ -62,6 +64,7 @@ impl PieceSquareTable {
         -10,  0,  5,  0,  0,  0,  0,-10,
         -20,-10,-10, -5, -5,-10,-10,-20
     ];
+
     #[rustfmt::skip]
     const KING: [i16; 64] = [
         -30,-40,-40,-50,-50,-40,-40,-30,
@@ -74,37 +77,57 @@ impl PieceSquareTable {
          20, 30, 10,  0,  0, 10, 30, 20
     ];
 
+    #[rustfmt::skip]
+    const KING_END: [i16; 64] = [
+        -50,-40,-30,-20,-20,-30,-40,-50,
+        -30,-20,-10,  0,  0,-10,-20,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 30, 40, 40, 30,-10,-30,
+        -30,-10, 20, 30, 30, 20,-10,-30,
+        -30,-30,  0,  0,  0,  0,-30,-30,
+        -50,-30,-30,-30,-30,-30,-30,-50
+    ];
+
     pub fn new() -> Self {
-        let mut white: [[i16; 64]; Kind::COUNT] = [[0; 64]; Kind::COUNT];
-        let mut black: [[i16; 64]; Kind::COUNT] = [[0; 64]; Kind::COUNT];
+        let mut white: [[[i16; 64]; Kind::COUNT]; Phase::COUNT] = [[[0; 64]; Kind::COUNT]; Phase::COUNT];
+        let mut black: [[[i16; 64]; Kind::COUNT]; Phase::COUNT] = [[[0; 64]; Kind::COUNT]; Phase::COUNT];
 
-        *Kind::Pawn.index_mut(&mut black) = Self::PAWN;
-        *Kind::Knight.index_mut(&mut black) = Self::KNIGHT;
-        *Kind::Bishop.index_mut(&mut black) = Self::BISHOP;
-        *Kind::Rook.index_mut(&mut black) = Self::ROOK;
-        *Kind::Queen.index_mut(&mut black) = Self::QUEEN;
-        *Kind::King.index_mut(&mut black) = Self::KING;
+        for phase in Phase::iter() {
+            *Kind::Pawn.index_mut(phase.index_mut(&mut black)) = Self::PAWN;
+            *Kind::Knight.index_mut(phase.index_mut(&mut black)) = Self::KNIGHT;
+            *Kind::Bishop.index_mut(phase.index_mut(&mut black)) = Self::BISHOP;
+            *Kind::Rook.index_mut(phase.index_mut(&mut black)) = Self::ROOK;
+            *Kind::Queen.index_mut(phase.index_mut(&mut black)) = Self::QUEEN;
+            *Kind::King.index_mut(phase.index_mut(&mut black)) = Self::KING;
+        }
 
-        // Swap white value for black
-        for kind in Kind::iter() {
-            for square in Square::iter() {
-                let value: i16 = *square.index(kind.index(&black));
+        *Kind::King.index_mut(Phase::Endgame.index_mut(&mut black)) = Self::KING_END;
 
-                *square.r#for(Color::Black).index_mut(kind.index_mut(&mut white)) = value;
+        // Swap black value for white
+        for phase in Phase::iter() {
+            for kind in Kind::iter() {
+                for square in Square::iter() {
+                    let value: i16 = *square.index(kind.index(phase.index(&black)));
+
+                    *square.r#for(Color::Black).index_mut(kind.index_mut(phase.index_mut(&mut white))) = value;
+                }
             }
         }
 
-        let mut table = Self { values: [[0; 64]; Piece::COUNT] };
+        let mut table = Self { values: [[[0; 64]; Piece::COUNT]; Phase::COUNT] };
 
-        for piece in Piece::iter() {
-            *piece.index_mut(&mut table.values) = *piece.kind().index(&match piece.color() { Color::White => white, Color::Black => black });
+        for phase in Phase::iter() {
+            for piece in Piece::iter() {
+                *piece.index_mut(phase.index_mut(&mut table.values)) = *piece.kind().index(phase.index(&match piece.color() { Color::White => white, Color::Black => black }));
+            }
         }
 
         table
     }
 
-    pub fn get(&self, piece: Piece, square: Square) -> i16 {
-        *square.index(piece.index(&self.values))
+    pub fn get(&self, piece: Piece, square: Square, phase: Phase) -> i16 {
+        *square.index(piece.index(phase.index(&self.values)))
     }
 }
 

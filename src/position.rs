@@ -1,5 +1,5 @@
 use crate::r#move::Move;
-use crate::types::{CastlingRights, Color, File, Kind, Piece, Rank, Square};
+use crate::types::{CastlingRights, Color, File, Kind, Piece, Rank, Square, Phase};
 use crate::{board::Board, global::GlobalData};
 
 use std::ops::Deref;
@@ -375,23 +375,25 @@ impl Position {
     pub fn evaluate(&self) -> i16 {
         let mut scores: [i16; Color::COUNT] = [0; Color::COUNT];
         let data = GlobalData::get();
-        let table = data.piece_square();
+        let table = data.square();
+        let phase = self.phase();
 
         for piece in Piece::iter() {
             let score: &mut i16 = piece.color().index_mut(&mut scores);
+            let bb = self.board.piece_bb(piece);
 
             // Material score
-            //*score += self.board.piece_bb(piece).count() as i16 * piece.kind().value();
+            *score += bb.count() as i16 * piece.kind().value();
 
-            // Square score TODO
-            *score += self
-                .board
-                .piece_bb(piece)
-                .map(|square| table.get(piece, square))
-                .sum::<i16>();
+            // Square score 
+            *score += bb.map(|square| table.get(piece, square, phase)).sum::<i16>();
         }
 
         self.turn().index(&scores) - (!self.turn()).index(&scores)
+    }
+
+    pub fn phase(&self) -> Phase {
+        Phase::Middle
     }
 }
 
@@ -422,7 +424,7 @@ mod tests {
 
     use super::*;
 
-    const DEPTH: usize = 10;
+    const DEPTH: usize = 100;
     const FENS: [&str; 6] = [
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
@@ -444,13 +446,18 @@ mod tests {
     #[test]
     fn make_unmake_hash() {
         let mut position = Position::new();
-        let mut moves = MoveVec::new();
         let mut rng = rand::rng();
 
         for _ in 0..DEPTH {
-            generate_dyn(&mut moves, &position);
+            let mut moves = MoveVec::new();
+            
+            generate_dyn::<true>(&mut moves, &position);
 
-            position.make(*moves.moves().choose(&mut rng).unwrap());
+            let m = *moves.moves().choose(&mut rng).unwrap();
+
+            println!("{m}");
+
+            position.make(m);
 
             let f = position.fen();
             let fen: [&str; 6] = f.split_whitespace().collect::<Vec<&str>>().try_into().unwrap();

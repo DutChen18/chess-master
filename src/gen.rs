@@ -32,11 +32,14 @@ pub trait MoveList {
             self.add::<PROMOTION>(shift.apply_inverse(to), to);
         }
     }
+
+    fn set_check(&mut self) {}
 }
 
 pub struct MoveVec {
     moves: [MaybeUninit<Move>; 218],
     count: usize,
+    check: bool,
 }
 
 fn generate_pawn_bb<C: ConstColor>(list: &mut impl MoveList, from: Square, to: Bitboard) {
@@ -53,7 +56,7 @@ fn generate_pawn_shift<C: ConstColor>(list: &mut impl MoveList, shift: &impl Shi
     list.add_shift::<true>(shift, to & rank_8);
 }
 
-pub fn generate<C: ConstColor>(list: &mut impl MoveList, position: &Position) {
+pub fn generate<C: ConstColor, const QUIET: bool>(list: &mut impl MoveList, position: &Position) {
     let global = GlobalData::get();
     let magic = global.magic();
     let attack = global.attack();
@@ -100,6 +103,10 @@ pub fn generate<C: ConstColor>(list: &mut impl MoveList, position: &Position) {
         target |= attack.between(own_king, checker);
     }
 
+    if !QUIET {
+        target &= opp;
+    }
+
     attacked |= shift::pawn_attack::<C::Opponent>(opp_pawn);
     attacked |= shift::knight_attack(opp_knight);
     attacked |= attack.king(opp_king);
@@ -123,18 +130,20 @@ pub fn generate<C: ConstColor>(list: &mut impl MoveList, position: &Position) {
         let long_mask = Bitboard(0x1C).r#for(C::color());
         let long_path = Bitboard(0x0E).r#for(C::color());
 
-        if castling_rights.has_short(C::color())
-            && short_mask & attacked == Bitboard(0)
-            && short_path & occupied == Bitboard(0)
-        {
-            list.add::<false>(Square::E1.r#for(C::color()), Square::G1.r#for(C::color()));
-        }
+        if QUIET {
+            if castling_rights.has_short(C::color())
+                && short_mask & attacked == Bitboard(0)
+                && short_path & occupied == Bitboard(0)
+            {
+                list.add::<false>(Square::E1.r#for(C::color()), Square::G1.r#for(C::color()));
+            }
 
-        if castling_rights.has_long(C::color())
-            && long_mask & attacked == Bitboard(0)
-            && long_path & occupied == Bitboard(0)
-        {
-            list.add::<false>(Square::E1.r#for(C::color()), Square::C1.r#for(C::color()));
+            if castling_rights.has_long(C::color())
+                && long_mask & attacked == Bitboard(0)
+                && long_path & occupied == Bitboard(0)
+            {
+                list.add::<false>(Square::E1.r#for(C::color()), Square::C1.r#for(C::color()));
+            }
         }
 
         // Pinned pawn moves
@@ -165,10 +174,18 @@ pub fn generate<C: ConstColor>(list: &mut impl MoveList, position: &Position) {
                 magic.rook(rook, occupied) & target & attack.line(own_king, rook),
             );
         }
+    } else {
+        list.set_check();
     }
 
     // King moves
-    list.add_bb::<false>(own_king, attack.king(own_king) & !attacked & !own);
+    let mut bb = attack.king(own_king) & !attacked & !own;
+
+    if !QUIET {
+        bb &= opp;
+    }
+
+    list.add_bb::<false>(own_king, bb);
 
     if checkers & (checkers - Bitboard(1)) != Bitboard(0) {
         // Double check, we are done
@@ -220,10 +237,10 @@ pub fn generate<C: ConstColor>(list: &mut impl MoveList, position: &Position) {
     }
 }
 
-pub fn generate_dyn(list: &mut impl MoveList, position: &Position) {
+pub fn generate_dyn<const QUIET: bool>(list: &mut impl MoveList, position: &Position) {
     match position.turn() {
-        Color::White => generate::<ConstWhite>(list, position),
-        Color::Black => generate::<ConstBlack>(list, position),
+        Color::White => generate::<ConstWhite, QUIET>(list, position),
+        Color::Black => generate::<ConstBlack, QUIET>(list, position),
     }
 }
 
@@ -232,6 +249,7 @@ impl MoveVec {
         Self {
             moves: [MaybeUninit::uninit(); 218],
             count: 0,
+            check: false,
         }
     }
 
@@ -241,6 +259,10 @@ impl MoveVec {
 
     pub fn moves_mut(&mut self) -> &mut [Move] {
         unsafe { mem::transmute(&mut self.moves[..self.count]) }
+    }
+
+    pub fn check(&self) -> bool {
+        self.check
     }
 }
 
@@ -256,6 +278,10 @@ impl MoveList for MoveVec {
     fn add_move(&mut self, r#move: Move) {
         self.moves[self.count].write(r#move);
         self.count += 1;
+    }
+
+    fn set_check(&mut self) {
+        self.check = true;
     }
 }
 

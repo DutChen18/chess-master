@@ -10,7 +10,7 @@ pub struct GlobalData {
     zobrist: ZobristTable,
     magic: MagicTable,
     attack: AttackTable,
-    piece_square: PieceSquareTable,
+    square: PieceSquareTable,
 }
 
 impl GlobalData {
@@ -34,7 +34,7 @@ impl GlobalData {
             zobrist: time("zobrist table", ZobristTable::new),
             magic: time("magic table", MagicTable::new),
             attack: time("attack table", AttackTable::new),
-            piece_square: time("piece square table", PieceSquareTable::new),
+            square: time("piece square table", PieceSquareTable::new),
         }
     }
 
@@ -50,7 +50,7 @@ impl GlobalData {
         &self.attack
     }
 
-    pub fn piece_square(&self) -> &PieceSquareTable {
-        &self.piece_square
+    pub fn square(&self) -> &PieceSquareTable {
+        &self.square
     }
 }

@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::{env, path::Path};
 
 use crate::{
     gen::*, position::Position, r#move::Move, search, searchlimits::SearchLimits,
@@ -45,6 +46,13 @@ impl Engine {
 
     pub fn uci_run(&mut self) {
         let mut quit = false;
+        let mut name = Self::NAME.to_string();
+
+        if let Some(arg) = env::args().nth(0) {
+            let path = Path::new(&arg);
+
+            name = format!("{}", path.file_name().unwrap().to_str().unwrap());
+        }
 
         while !quit {
             let mut buffer = String::new();
@@ -60,7 +68,7 @@ impl Engine {
             if let Some(command) = words.first() {
                 match *command {
                     "uci" => {
-                        println!("id name {}", Self::NAME);
+                        println!("id name {name}");
                         println!("id author {}", Self::AUTHOR);
                         // println!("option name OwnBook");
                         println!("uciok");
@@ -140,14 +148,14 @@ impl Engine {
         } else if depth == 1 && !root {
             let mut total = 0;
 
-            generate_dyn(&mut total, &self.position);
+            generate_dyn::<true>(&mut total, &self.position);
 
             return total;
         }
 
         let mut moves = MoveVec::new();
 
-        generate_dyn(&mut moves, &self.position);
+        generate_dyn::<true>(&mut moves, &self.position);
 
         let mut total = 0;
 
