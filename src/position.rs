@@ -20,7 +20,7 @@ pub struct UndoState {
 #[derive(Clone)]
 pub struct Position {
     board: Board,
-    ply: usize,
+    ply: u32,
     states: Vec<State>,
 }
 
@@ -75,7 +75,7 @@ impl Position {
         };
 
         let halfmove_clock = fen[4].parse().unwrap();
-        let ply = fen[5].parse::<usize>().unwrap() * 2 - 2 + color as usize;
+        let ply = fen[5].parse::<u32>().unwrap() * 2 - 2 + color as u32;
 
         let state = State {
             hash,
@@ -160,6 +160,10 @@ impl Position {
 
     pub fn hash(&self) -> u64 {
         self.state().hash
+    }
+
+    pub fn ply(&self) -> u32 {
+        self.ply
     }
 
     pub fn turn(&self) -> Color {
@@ -380,7 +384,11 @@ impl Position {
             //*score += self.board.piece_bb(piece).count() as i16 * piece.kind().value();
 
             // Square score TODO
-            *score += self.board.piece_bb(piece).map(|square| table.get(piece, square)).sum::<i16>();
+            *score += self
+                .board
+                .piece_bb(piece)
+                .map(|square| table.get(piece, square))
+                .sum::<i16>();
         }
 
         self.turn().index(&scores) - (!self.turn()).index(&scores)
@@ -404,5 +412,51 @@ fn castling_rights_mask(square: Square) -> CastlingRights {
         Square::A8 => !CastlingRights::BLACK_LONG,
         Square::E8 => !CastlingRights::BLACK,
         _ => CastlingRights::ALL,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::gen::*;
+    use rand::prelude::*;
+
+    use super::*;
+
+    const DEPTH: usize = 10;
+    const FENS: [&str; 6] = [
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+        "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+        "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    ];
+
+    #[test]
+    fn fen() {
+        for fen in FENS {
+            let array: [&str; 6] = fen.split_whitespace().collect::<Vec<&str>>().try_into().unwrap();
+
+            assert!(fen == Position::parse(&array).fen());
+        }
+    }
+
+    #[test]
+    fn make_unmake_hash() {
+        let mut position = Position::new();
+        let mut moves = MoveVec::new();
+        let mut rng = rand::rng();
+
+        for _ in 0..DEPTH {
+            generate_dyn(&mut moves, &position);
+
+            position.make(*moves.moves().choose(&mut rng).unwrap());
+
+            let f = position.fen();
+            let fen: [&str; 6] = f.split_whitespace().collect::<Vec<&str>>().try_into().unwrap();
+            let cpy = Position::parse(&fen);
+
+            assert!(position.hash() == cpy.hash());
+        }
     }
 }

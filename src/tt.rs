@@ -12,8 +12,9 @@ pub enum Bound {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct Entry {
     hash: u64,
-    depth: u16,
+    age: u32,
     r#move: Move,
+    depth: u16,
     score: i16,
     bound: Bound,
 }
@@ -26,6 +27,7 @@ impl Entry {
     pub fn null() -> Self {
         Self {
             hash: 0,
+            age: 0,
             r#move: Move::null(),
             depth: 0,
             score: 0,
@@ -33,14 +35,19 @@ impl Entry {
         }
     }
 
-    pub fn new(hash: u64, r#move: Move, depth: u16, score: i16, bound: Bound) -> Self {
+    pub fn new(hash: u64, age: u32, r#move: Move, depth: u16, score: i16, bound: Bound) -> Self {
         Self {
             hash,
+            age,
             r#move,
             depth,
             score,
             bound,
         }
+    }
+
+    pub fn age(&self) -> u32 {
+        self.age
     }
 
     pub fn r#move(&self) -> Move {
@@ -54,6 +61,14 @@ impl Entry {
     pub fn score(&self) -> i16 {
         self.score
     }
+
+    pub fn bound(&self) -> Bound {
+        self.bound
+    }
+
+    pub fn value(&self) -> u32 {
+        self.age * 2 + self.depth as u32
+    }
 }
 
 impl TranspositionTable {
@@ -64,7 +79,11 @@ impl TranspositionTable {
     }
 
     pub fn insert(&mut self, entry: Entry) {
-        self.table[entry.hash as usize % TT_SIZE] = entry;
+        let table_entry = &mut self.table[entry.hash as usize % TT_SIZE];
+
+        if entry.value() > table_entry.value() {
+            *table_entry = entry;
+        }
     }
 
     pub fn probe(&self, hash: u64) -> Option<Entry> {

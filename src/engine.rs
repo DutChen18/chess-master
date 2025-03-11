@@ -8,6 +8,7 @@ use crate::{
 pub struct Engine {
     position: Position,
     tt: TranspositionTable,
+    age: u32,
 }
 
 impl Engine {
@@ -18,6 +19,7 @@ impl Engine {
         Self {
             position: Position::new(),
             tt: TranspositionTable::new(),
+            age: 0,
         }
     }
 
@@ -35,6 +37,10 @@ impl Engine {
 
     pub fn tt_mut(&mut self) -> &mut TranspositionTable {
         &mut self.tt
+    }
+
+    pub fn age(&self) -> u32 {
+        self.age
     }
 
     pub fn uci_run(&mut self) {
@@ -107,6 +113,8 @@ impl Engine {
         if let Some(command) = words.first() {
             if *command == "perft" {
                 self.uci_perft(&words[1..]);
+
+                return;
             }
         }
 
@@ -116,6 +124,8 @@ impl Engine {
             "bestmove {}",
             search::search(self, limits.get_end_time(self.position.turn()))
         );
+
+        self.age += 1;
     }
 
     pub fn uci_perft(&mut self, words: &[&str]) {

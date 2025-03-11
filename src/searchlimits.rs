@@ -61,8 +61,6 @@ impl SearchLimits {
             return Instant::now() + movetime;
         }
 
-        // TODO: improve
-
-        Instant::now() + *color.index(&self.time) / 60
+        Instant::now() + std::cmp::min(*color.index(&self.time) / 2, Duration::from_millis(100)) + *color.index(&self.inc)
     }
 }
