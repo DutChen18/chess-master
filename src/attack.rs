@@ -31,44 +31,26 @@ impl AttackTable {
             *square.index_mut(&mut king) = shift::king_attack(bb);
 
             for other in Square::iter() {
-                let reachable_square = shift::rook_ray(bb, !Bitboard(0));
-                let reachable_other = shift::rook_ray(other.into(), !Bitboard(0));
+                for f in [shift::rook_ray, shift::bishop_ray] {
+                    let reachable_square = f(bb, !Bitboard(0));
+                    let reachable_other = f(other.into(), !Bitboard(0));
 
-                if reachable_square.into_iter().any(|s| s == other)
-                    && reachable_other.into_iter().any(|s| s == square)
-                {
-                    let mut all = reachable_square & reachable_other;
+                    if reachable_square.into_iter().any(|s| s == other)
+                        && reachable_other.into_iter().any(|s| s == square)
+                    {
+                        let mut all = reachable_square & reachable_other;
 
-                    *square.index_mut(other.index_mut(&mut line)) = all;
+                        *square.index_mut(other.index_mut(&mut line)) = all;
 
-                    for s in all.clone() {
-                        // Remove squares not between points
-                        if !((square < s && s < other) || (other < s && s < square)) {
-                            all &= !Into::<Bitboard>::into(s);
+                        for s in all.clone() {
+                            // Remove squares not between points
+                            if !((square < s && s < other) || (other < s && s < square)) {
+                                all &= !Into::<Bitboard>::into(s);
+                            }
                         }
+
+                        *square.index_mut(other.index_mut(&mut between)) = all;
                     }
-
-                    *square.index_mut(other.index_mut(&mut between)) = all;
-                }
-                
-                let reachable_square = shift::bishop_ray(bb, !Bitboard(0));
-                let reachable_other = shift::bishop_ray(other.into(), !Bitboard(0));
-
-                if reachable_square.into_iter().any(|s| s == other)
-                    && reachable_other.into_iter().any(|s| s == square)
-                {
-                    let mut all = reachable_square & reachable_other;
-
-                    *square.index_mut(other.index_mut(&mut line)) = all;
-
-                    for s in all.clone() {
-                        // Remove squares not between points
-                        if !((square < s && s < other) || (other < s && s < square)) {
-                            all &= !Into::<Bitboard>::into(s);
-                        }
-                    }
-
-                    *square.index_mut(other.index_mut(&mut between)) = all;
                 }
             }
         }

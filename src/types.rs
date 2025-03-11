@@ -112,11 +112,11 @@ macro_rules! define_enum {
                 pub const COUNT: usize = count!($($variant)*);
 
                 pub fn index<T>(self, array: &[T; Self::COUNT]) -> &T {
-                    &array[self as usize]
+                    unsafe { array.get_unchecked(self as usize) }
                 }
 
                 pub fn index_mut<T>(self, array: &mut [T; Self::COUNT]) -> &mut T {
-                    &mut array[self as usize]
+                    unsafe { array.get_unchecked_mut(self as usize) }
                 }
 
                 pub fn iter() -> impl Iterator<Item = Self> + DoubleEndedIterator + ExactSizeIterator {
@@ -297,15 +297,15 @@ impl Kind {
 }
 
 impl Piece {
-    pub fn new(color: Color, kind: Kind) -> Self {
+    pub const fn new(color: Color, kind: Kind) -> Self {
         unsafe { mem::transmute(color as u8 | (kind as u8) << 1) }
     }
 
-    pub fn color(self) -> Color {
+    pub const fn color(self) -> Color {
         unsafe { mem::transmute(self as u8 & 1) }
     }
 
-    pub fn kind(self) -> Kind {
+    pub const fn kind(self) -> Kind {
         unsafe { mem::transmute(self as u8 >> 1) }
     }
 
@@ -322,6 +322,15 @@ impl Piece {
 
     pub fn from_str(s: &str) -> Self {
         Self::from_char(s.chars().nth(0).unwrap())
+    }
+    
+    pub fn to_char(&self) -> char {
+        let c = self.kind().to_char();
+
+        match self.color() {
+            Color::White => c.to_uppercase().next().unwrap(),
+            Color::Black => c,
+        }
     }
 }
 
@@ -390,7 +399,7 @@ impl Rank {
         }
     }
 
-    pub fn r#for(self, color: Color) -> Self {
+    pub const fn r#for(self, color: Color) -> Self {
         match color {
             Color::White => self,
             Color::Black => unsafe { mem::transmute(self as u8 ^ 7) },
@@ -399,15 +408,15 @@ impl Rank {
 }
 
 impl Square {
-    pub fn new(file: File, rank: Rank) -> Self {
+    pub const fn new(file: File, rank: Rank) -> Self {
         unsafe { mem::transmute(file as u8 | (rank as u8) << 3) }
     }
 
-    pub fn file(self) -> File {
+    pub const fn file(self) -> File {
         unsafe { mem::transmute(self as u8 & 7) }
     }
 
-    pub fn rank(self) -> Rank {
+    pub const fn rank(self) -> Rank {
         unsafe { mem::transmute(self as u8 >> 3) }
     }
 
@@ -418,7 +427,7 @@ impl Square {
         Self::new(file, rank)
     }
 
-    pub fn r#for(self, color: Color) -> Self {
+    pub const fn r#for(self, color: Color) -> Self {
         match color {
             Color::White => self,
             Color::Black => unsafe { mem::transmute(self as u8 ^ 56) },
@@ -443,6 +452,12 @@ impl fmt::Display for Kind {
     }
 }
 
+impl fmt::Display for Piece {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_char())
+    }
+}
+
 impl fmt::Display for File {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_char())
@@ -458,5 +473,17 @@ impl fmt::Display for Rank {
 impl fmt::Display for Square {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}{}", self.file().to_char(), self.rank().to_char())
+    }
+}
+
+impl fmt::Display for CastlingRights {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.has(Self::WHITE_SHORT) { write!(f, "K")?; }
+        if self.has(Self::WHITE_LONG) { write!(f, "Q")?; }
+        if self.has(Self::BLACK_SHORT) { write!(f, "k")?; }
+        if self.has(Self::BLACK_LONG) { write!(f, "q")?; }
+        if *self == Self::NONE { write!(f, "-")?; }
+
+        Ok(())
     }
 }

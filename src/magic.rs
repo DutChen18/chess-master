@@ -74,15 +74,21 @@ impl MagicTable {
 
     pub fn bishop(&self, square: Square, occupied: Bitboard) -> Bitboard {
         let magic = square.index(&self.bishop);
-        let index = unsafe { x86_64::_pext_u64(occupied.0, magic.mask.0) } as usize;
 
-        self.bitboards[magic.index + index]
+        unsafe {
+            let index = x86_64::_pext_u64(occupied.0, magic.mask.0) as usize;
+
+            *self.bitboards.get_unchecked(magic.index + index)
+        }
     }
 
     pub fn rook(&self, square: Square, occupied: Bitboard) -> Bitboard {
         let magic = square.index(&self.rook);
-        let index = unsafe { x86_64::_pext_u64(occupied.0, magic.mask.0) } as usize;
 
-        self.bitboards[magic.index + index]
+        unsafe {
+            let index = x86_64::_pext_u64(occupied.0, magic.mask.0) as usize;
+
+            *self.bitboards.get_unchecked(magic.index + index)
+        }
     }
 }

@@ -1,3 +1,5 @@
+use std::mem::{self, MaybeUninit};
+
 use crate::bitboard::Bitboard;
 use crate::global::GlobalData;
 use crate::position::Position;
@@ -30,6 +32,11 @@ pub trait MoveList {
             self.add::<PROMOTION>(shift.apply_inverse(to), to);
         }
     }
+}
+
+pub struct MoveVec {
+    moves: [MaybeUninit<Move>; 218],
+    count: usize,
 }
 
 fn generate_pawn_bb<C: ConstColor>(list: &mut impl MoveList, from: Square, to: Bitboard) {
@@ -220,8 +227,70 @@ pub fn generate_dyn(list: &mut impl MoveList, position: &Position) {
     }
 }
 
+impl MoveVec {
+    pub fn new() -> Self {
+        Self {
+            moves: [MaybeUninit::uninit(); 218],
+            count: 0,
+        }
+    }
+
+    pub fn moves(&self) -> &[Move] {
+        unsafe { mem::transmute(&self.moves[..self.count]) }
+    }
+
+    pub fn moves_mut(&mut self) -> &mut [Move] {
+        unsafe { mem::transmute(&mut self.moves[..self.count]) }
+    }
+}
+
+impl Drop for MoveVec {
+    fn drop(&mut self) {
+        for r#move in &mut self.moves[..self.count] {
+            unsafe { r#move.assume_init_drop() };
+        }
+    }
+}
+
+impl MoveList for MoveVec {
+    fn add_move(&mut self, r#move: Move) {
+        self.moves[self.count].write(r#move);
+        self.count += 1;
+    }
+}
+
 impl MoveList for Vec<Move> {
     fn add_move(&mut self, r#move: Move) {
         self.push(r#move);
+    }
+}
+
+impl MoveList for usize {
+    fn add_move(&mut self, _: Move) {
+        *self += 1;
+    }
+
+    fn add<const PROMOTION: bool>(&mut self, _: Square, _: Square) {
+        if PROMOTION {
+            *self += 4;
+        } else {
+            *self += 1;
+        }
+    }
+
+    fn add_bb<const PROMOTION: bool>(&mut self, _: Square, to: Bitboard) {
+        if PROMOTION {
+            *self += to.count() * 4;
+        } else {
+            *self += to.count();
+        }
+    }
+
+    fn add_shift<const PROMOTION: bool>(&mut self, _: &impl Shift, to: Bitboard) {
+        if PROMOTION {
+            *self += to.count() * 4;
+        } else {
+            *self += to.count();
+        }
     }
 }

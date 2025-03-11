@@ -6,6 +6,10 @@ use std::mem;
 pub struct Move(u16);
 
 impl Move {
+    pub fn null() -> Self {
+        Self::new(Square::A1, Square::A1)
+    }
+
     pub fn new(from: Square, to: Square) -> Self {
         Self(from as u16 | (to as u16) << 6 | 24576)
     }

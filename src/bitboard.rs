@@ -28,21 +28,19 @@ impl Bitboard {
             Color::Black => Self(self.0.swap_bytes()),
         }
     }
-
-    // TODO: popcount
 }
 
 impl Iterator for Bitboard {
     type Item = Square;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.square();
+        let square = self.square(); 
+        self.0 &= self.0.wrapping_sub(1);
+        square
+    }
 
-        if item.is_some() {
-            self.pop();
-        }
-
-        item
+    fn count(self) -> usize {
+        self.0.count_ones() as usize
     }
 }
 

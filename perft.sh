@@ -15,4 +15,4 @@ while read -r fen; do
 	echo -e "position fen $fen moves ${@:2}\n go perft $depth" | ./target/release/chess-master | sort > perft/cb
 
 	diff perft/sf perft/cb
-done < fens
+done < fens.fen

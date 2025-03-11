@@ -1,6 +1,6 @@
-use crate::{board::Board, global::GlobalData};
 use crate::r#move::Move;
 use crate::types::{CastlingRights, Color, File, Kind, Piece, Rank, Square};
+use crate::{board::Board, global::GlobalData};
 
 use std::ops::Deref;
 
@@ -92,24 +92,52 @@ impl Position {
     }
 
     pub fn fen(&self) -> String {
-        let fen = String::new();
-
+        let mut fen = String::new();
         let mut empty = 0;
 
         for rank in Rank::iter().rev() {
             for file in File::iter() {
                 if let Some(piece) = self.board.get(Square::new(file, rank)) {
                     if empty > 0 {
-                        print!("{empty}");
+                        fen.push_str(&empty.to_string());
                         empty = 0;
                     }
 
-                    print!("{}", piece.kind());
+                    fen.push_str(&piece.to_string());
                 } else {
                     empty += 1;
-                }                
+                }
+            }
+
+            if empty > 0 {
+                fen.push_str(&empty.to_string());
+                empty = 0;
+            }
+
+            if rank != Rank::_1 {
+                fen.push_str("/");
             }
         }
+
+        fen.push(' ');
+        fen.push_str(match self.turn() {
+            Color::White => "w",
+            Color::Black => "b",
+        });
+        fen.push(' ');
+        fen.push_str(&format!("{}", self.castling_rights()));
+        fen.push(' ');
+
+        match self.en_passant() {
+            Some(square) => fen.push_str(&format!("{}", square)),
+            None => fen.push('-'),
+        }
+
+        fen.push_str(&format!(
+            " {} {}",
+            self.state().halfmove_clock,
+            self.ply / 2 + 1
+        ));
 
         fen
     }
@@ -128,6 +156,10 @@ impl Position {
 
     pub fn en_passant(&self) -> Option<Square> {
         self.state().en_passant
+    }
+
+    pub fn hash(&self) -> u64 {
+        self.state().hash
     }
 
     pub fn turn(&self) -> Color {
@@ -262,18 +294,9 @@ impl Position {
         }
 
         // Set castling
-        for square in [r#move.from(), r#move.to()] {
-            match square {
-                Square::H1 => state.castling_rights &= !CastlingRights::WHITE_SHORT,
-                Square::A1 => state.castling_rights &= !CastlingRights::WHITE_LONG,
-                Square::E1 => state.castling_rights &= !CastlingRights::WHITE,
-                Square::H8 => state.castling_rights &= !CastlingRights::BLACK_SHORT,
-                Square::A8 => state.castling_rights &= !CastlingRights::BLACK_LONG,
-                Square::E8 => state.castling_rights &= !CastlingRights::BLACK,
-                _ => (),
-            }
-        }
-        
+        state.castling_rights &= castling_rights_mask(r#move.from());
+        state.castling_rights &= castling_rights_mask(r#move.to());
+
         self.ply += 1;
 
         state.hash ^= zobrist.color();
@@ -346,14 +369,18 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
-        let mut scores: [i16; 2] = [0, 0];
+        let mut scores: [i16; Color::COUNT] = [0; Color::COUNT];
+        let data = GlobalData::get();
+        let table = data.piece_square();
 
-        for color in Color::iter() {
-            for kind in Kind::iter() {
-                let bb = self.board.color_kind_bb(color, kind);
+        for piece in Piece::iter() {
+            let score: &mut i16 = piece.color().index_mut(&mut scores);
 
-                *color.index_mut(&mut scores) += bb.count() as i16 * kind.value();
-            }
+            // Material score
+            //*score += self.board.piece_bb(piece).count() as i16 * piece.kind().value();
+
+            // Square score TODO
+            *score += self.board.piece_bb(piece).map(|square| table.get(piece, square)).sum::<i16>();
         }
 
         self.turn().index(&scores) - (!self.turn()).index(&scores)
@@ -365,5 +392,17 @@ impl Deref for Position {
 
     fn deref(&self) -> &Self::Target {
         &self.board
+    }
+}
+
+fn castling_rights_mask(square: Square) -> CastlingRights {
+    match square {
+        Square::H1 => !CastlingRights::WHITE_SHORT,
+        Square::A1 => !CastlingRights::WHITE_LONG,
+        Square::E1 => !CastlingRights::WHITE,
+        Square::H8 => !CastlingRights::BLACK_SHORT,
+        Square::A8 => !CastlingRights::BLACK_LONG,
+        Square::E8 => !CastlingRights::BLACK,
+        _ => CastlingRights::ALL,
     }
 }
