@@ -1,5 +1,6 @@
 use crate::types::{Color, File, Rank, Square};
 
+use std::fmt::Binary;
 use std::ops::{
     Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, MulAssign,
     Neg, Not, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
@@ -41,6 +42,16 @@ impl Iterator for Bitboard {
 
     fn count(self) -> usize {
         self.0.count_ones() as usize
+    }
+}
+
+impl Binary for Bitboard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for i in 0..8 {
+            writeln!(f, "{:08b}", (self.0  >> (8 * i)) & 0xFF)?;
+        }
+
+        Ok(())
     }
 }
 

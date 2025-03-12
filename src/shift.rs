@@ -11,7 +11,7 @@ pub trait Shift {
     fn apply_inverse(&self, square: Square) -> Square;
 }
 
-trait Ray {
+pub trait Ray {
     fn one(&self) -> impl Shift;
     fn two(&self) -> impl Shift;
     fn four(&self) -> impl Shift;
@@ -91,7 +91,7 @@ impl<const FILE: i32, const RANK: i32> Shift for Offset<FILE, RANK> {
     }
 }
 
-fn ray(ray: impl Ray, mut gen: Bitboard, mut pro: Bitboard) -> Bitboard {
+pub fn ray(ray: impl Ray, mut gen: Bitboard, mut pro: Bitboard) -> Bitboard {
     gen |= pro & ray.one().shift(gen);
     pro &= ray.one().shift(pro);
     gen |= pro & ray.two().shift(gen);

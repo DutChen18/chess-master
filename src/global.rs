@@ -21,11 +21,11 @@ impl GlobalData {
     }
 
     pub fn new() -> Self {
-        fn time<T>(name: &str, func: fn() -> T) -> T {
-            let start = Instant::now();
+        fn time<T>(_name: &str, func: fn() -> T) -> T {
+            let _start = Instant::now();
             let value = (func)();
 
-            eprintln!("init {} took {:?}", name, start.elapsed());
+            //eprintln!("init {} took {:?}", name, start.elapsed());
 
             value
         }

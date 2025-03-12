@@ -5,7 +5,7 @@ edition = "2021"
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+lto = true
 
 [profile.release-with-debug]
 inherits = "release"

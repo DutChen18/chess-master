@@ -1,10 +1,15 @@
 #!/bin/bash
 
-#engines=""
+engines=""
 
-#for engine in binaries/*; do
-#	engines+=" -engine cmd=$engine"
-#done
+#engines+=" -engine cmd=stockfish"
+#engines+=" -engine cmd=target/release/chess-master"
 
-cutechess-cli -engine cmd=binaries/v3 -engine cmd=./target/release/chess-master -each proto=uci st=0.1 timemargin=1000 -tournament round-robin -pgnout pgn $@
+for engine in binaries/*; do
+	engines+=" -engine cmd=$engine"
+done
+
+echo "$engines"
+
+cutechess-cli $engines -tournament round-robin -games 10 -concurrency 10 -pgnout pgn -each proto=uci st=0.1 timemargin=250 $@
 

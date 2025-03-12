@@ -8,15 +8,14 @@ use crate::{
     tt::{Bound, Entry},
 };
 
-const MIN_SCORE: i16 = i16::MIN + 1;
-const MAX_SCORE: i16 = i16::MAX;
+const MAX_SCORE: i16 = i16::MAX / 2;
+const MIN_SCORE: i16 = -MAX_SCORE;
 const MATE_SCORE: i16 = MAX_SCORE / 2;
 
 struct Stats {
     root_ply: u32,
     best_index_distribution: Vec<usize>,
 }
-
 
 // TODO: also do checks in quiescence search
 fn quiesce(engine: &mut Engine, stats: &mut Stats, mut alpha: i16, beta: i16) -> i16 {
@@ -47,7 +46,7 @@ fn quiesce(engine: &mut Engine, stats: &mut Stats, mut alpha: i16, beta: i16) ->
         return best_score;
     }
 
-    while let Some((i, r#move)) = pick.next(engine) {
+    while let Some((i, r#move)) = pick.next(engine.position()) {
         let undo = engine.position_mut().make(r#move);
         let score = -quiesce(engine, stats, -beta, -alpha);
 
@@ -97,8 +96,6 @@ fn alpha_beta(
     beta: i16,
     depth: u16,
 ) -> Option<i16> {
-    // TODO: aspiration windows
-
     if depth == 0 {
         return Some(quiesce(engine, stats, alpha, beta));
     } else if depth >= 4 && Instant::now() >= end {
@@ -111,14 +108,16 @@ fn alpha_beta(
     let mut bound = Bound::Upper;
     let mut pick = Pick::new::<true>(engine);
 
+    // Checkmate or draw
     if pick.is_empty() {
         if pick.check() {
-            return Some(MIN_SCORE + (engine.position().ply() - stats.root_ply) as i16);
+            return Some(MIN_SCORE + (engine.position().ply() - stats.root_ply) as i16 + 1);
         } else {
             return Some(0);
         }
     }
 
+    // TT cut
     if let Some(entry) = pick.entry() {
         if match entry.bound() {
             Bound::Exact => true,
@@ -130,11 +129,37 @@ fn alpha_beta(
         }
     }
 
-    while let Some((i, r#move)) = pick.next(engine) {
+    // Null move pruning
+    if !pick.check() && !engine.position().is_king_and_pawn(engine.position().turn()) && depth >= 3
+    {
+        engine.position_mut().make_null();
+
+        let score = alpha_beta(engine, stats, end, -beta, -(beta - 1), depth - 3);
+
+        engine.position_mut().unmake_null();
+
+        let score = -score?;
+
+        if score >= beta {
+            return Some(score);
+        }
+    }
+
+    // Search all children
+    while let Some((i, r#move)) = pick.next(engine.position()) {
+        let mut new_depth = depth - 1;
+
+        // Late move reduction
+        if i > 2 && new_depth > 0 {
+            new_depth -= 1;
+        }
+
         let undo = engine.position_mut().make(r#move);
-        let score = -alpha_beta(engine, stats, end, -beta, -alpha, depth - 1)?;
+        let score = alpha_beta(engine, stats, end, -beta, -alpha, new_depth);
 
         engine.position_mut().unmake(undo);
+
+        let score = -score?;
 
         if score > best_score {
             best_score = score;
@@ -154,6 +179,7 @@ fn alpha_beta(
         }
     }
 
+    // Update TT
     let hash = engine.position().hash();
     let age = engine.age();
 
@@ -161,6 +187,7 @@ fn alpha_beta(
         .tt_mut()
         .insert(Entry::new(hash, age, best_move, depth, best_score, bound));
 
+    // Updaet stats
     if let Some(best_index) = best_index {
         if best_index >= stats.best_index_distribution.len() {
             stats.best_index_distribution.resize(best_index + 1, 0);
@@ -198,12 +225,16 @@ fn get_pv(engine: &mut Engine, pv: &mut Vec<Move>, visited: &mut HashSet<u64>) {
 }
 
 pub fn search(engine: &mut Engine, end: Instant) -> Move {
+    /*
     if let Some(r#move) = engine.book().next(engine.position()) {
         return r#move;
     }
+    */
 
     let start = Instant::now();
     let mut best_move = Move::null();
+    let mut min_score = MIN_SCORE;
+    let mut max_score = MAX_SCORE;
 
     for depth in 1.. {
         let mut stats = Stats {
@@ -211,9 +242,26 @@ pub fn search(engine: &mut Engine, end: Instant) -> Move {
             best_index_distribution: Vec::new(),
         };
 
-        let Some(score) = alpha_beta(engine, &mut stats, end, MIN_SCORE, MAX_SCORE, depth) else {
-            break;
-        };
+        let mut score;
+
+        loop {
+            let Some(s) = alpha_beta(engine, &mut stats, end, min_score, max_score, depth) else {
+                return best_move;
+            };
+
+            score = s;
+
+            if score <= min_score || score >= max_score {
+                eprintln!("outside aspiration window");
+
+                min_score = MIN_SCORE;
+                max_score = MAX_SCORE;
+            } else {
+                eprintln!("inside aspiration window");
+
+                break;
+            }
+        }
 
         let ms = start.elapsed().as_millis();
         let mut pv = Vec::new();
@@ -222,12 +270,14 @@ pub fn search(engine: &mut Engine, end: Instant) -> Move {
         get_pv(engine, &mut pv, &mut visited);
 
         best_move = pv[0];
+        min_score = i16::max(score, MIN_SCORE + 50) - 50;
+        max_score = i16::min(score, MAX_SCORE - 50) + 50;
 
         print!("info depth {depth} time {ms} score ");
 
         if score.abs() > MATE_SCORE {
             if score > 0 {
-                print!("mate {}", (MAX_SCORE - score + 1) / 2);
+                print!("mate {}", (MAX_SCORE - score) / 2);
             } else {
                 print!("mate {}", (MIN_SCORE - score) / 2);
             }

@@ -67,7 +67,12 @@ impl Entry {
     }
 
     pub fn value(&self) -> u32 {
-        self.age * 2 + self.depth as u32
+        let bound_score = match self.bound {
+            Bound::Exact => 1,
+            _ => 0,
+        };
+
+        self.age * 16 + self.depth as u32 * 2 + bound_score
     }
 }
 

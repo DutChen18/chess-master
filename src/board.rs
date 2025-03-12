@@ -66,4 +66,10 @@ impl Board {
     pub fn rook_queen_bb(&self, color: Color) -> Bitboard {
         (self.kind_bb(Kind::Rook) | self.kind_bb(Kind::Queen)) & self.color_bb(color)
     }
+
+    pub fn is_king_and_pawn(&self, color: Color) -> bool {
+        let bb = self.color_bb(color);
+
+        bb == (bb & (self.kind_bb(Kind::Pawn) | self.kind_bb(Kind::King)))
+    }
 }

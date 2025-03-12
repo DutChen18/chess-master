@@ -1,6 +1,7 @@
 use std::time::Instant;
 use std::{env, path::Path};
 
+use crate::options::Options;
 use crate::{
     gen::*, position::Position, r#move::Move, search, searchlimits::SearchLimits,
     tt::TranspositionTable, book::Book,
@@ -11,6 +12,7 @@ pub struct Engine {
     tt: TranspositionTable,
     book: Book,
     age: u32,
+    pub options: Options,
 }
 
 impl Engine {
@@ -23,6 +25,7 @@ impl Engine {
             tt: TranspositionTable::new(),
             book: Book::new(),
             age: 0,
+            options: Options::new(),
         }
     }
 
@@ -77,6 +80,15 @@ impl Engine {
                         println!("id name {name}");
                         println!("id author {}", Self::AUTHOR);
                         println!("uciok");
+                    }
+                    "debug" => {
+                        if let Some(&arg) = words.iter().nth(1) {
+                            match arg {
+                                "on" => self.options.debug = true,
+                                "off" => self.options.debug = false,
+                                _ => (),
+                            }
+                        }   
                     }
                     "isready" => println!("readyok"),
                     "setoption" => todo!(),

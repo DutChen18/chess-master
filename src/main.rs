@@ -1,4 +1,5 @@
 use engine::Engine;
+use position::Position;
 
 pub mod attack;
 pub mod bitboard;
@@ -18,9 +19,13 @@ pub mod types;
 pub mod zobrist;
 pub mod book;
 pub mod pick;
+pub mod options;
 
 fn main() {
     let mut engine = Engine::new();
+    let p = Position::new();
+
+    p.evaluate();
 
     engine.uci_run();
 }

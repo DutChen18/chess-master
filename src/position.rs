@@ -1,7 +1,11 @@
-use crate::bitboard::Bitboard;
-use crate::r#move::Move;
-use crate::types::{CastlingRights, Color, File, Kind, Phase, Piece, Rank, Square};
-use crate::{board::Board, global::GlobalData};
+use crate::{
+    bitboard::Bitboard,
+    board::Board,
+    global::GlobalData,
+    r#move::Move,
+    shift::{self, Offset, Shift},
+    types::*,
+};
 
 use std::ops::Deref;
 
@@ -186,14 +190,37 @@ impl Position {
         }
     }
 
+    pub fn make_null(&mut self) {
+        let data = GlobalData::get();
+        let zobrist = data.zobrist();
+
+        let mut state = self.state().clone();
+
+        if let Some(ep) = state.en_passant {
+            state.hash ^= zobrist.en_passant(ep.file());
+        }
+
+        state.hash ^= zobrist.color();
+        state.en_passant = None;
+
+        self.ply += 1;
+        self.states.push(state);
+    }
+
+    pub fn unmake_null(&mut self) {
+        self.states.pop();
+        self.ply -= 1;
+    }
+
     pub fn make(&mut self, r#move: Move) -> UndoState {
-        let zobrist = GlobalData::get().zobrist();
-        let mut state = self.states.last().unwrap().clone();
+        let data = GlobalData::get();
+        let zobrist = data.zobrist();
+        let table = data.square();
+
+        let mut state = self.state().clone();
         let piece = self.board.get(r#move.from()).unwrap();
         let mut capture = self.board.get(r#move.to());
         let mut phase = self.phase();
-        let data = GlobalData::get();
-        let table = data.square();
 
         self.board.set(r#move.from(), None);
         self.board.set(r#move.to(), Some(piece));
@@ -421,30 +448,42 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
-        let scores = self.state().material;
-
-        (self.turn().index(&scores) - (!self.turn()).index(&scores))
-            + self.state().square_score * self.turn().sign()
-            + self.evaluate_pawn_structure()
+        (self.state().square_score + self.evaluate_side::<ConstWhite>() - self.evaluate_side::<ConstBlack>()) * self.turn().sign()
     }
 
-    pub fn evaluate_pawn_structure(&self) -> i16 {
-        let mut score = 0;
+    pub fn evaluate_side<C: ConstColor>(&self) -> i16 {
+        let mut score: i16 = 0;
 
-        for color in Color::iter() {
-            let bb = self.board.color_kind_bb(color, Kind::Pawn);
-
-            // Punish double pawns
-            for file in File::iter() {
-                if (Bitboard::from(file) & bb).count() >= 2 {
-                    score -= 50 * color.sign();
-                }
-            }
-        }
+        score += C::color().index(&self.state().material);
+        score += self.evaluate_pawn_structure::<C>();
 
         score
     }
 
+    pub fn evaluate_pawn_structure<C: ConstColor>(&self) -> i16 {
+        const PROTECTED: i16 = 10;
+        const ISOLATED: i16 = -25;
+        const DOUBLED: i16 = -25;
+
+        let mut score = 0;
+
+        let bb = self.board.color_kind_bb(C::color(), Kind::Pawn);
+
+        // Reward pawns protecting each other
+        score += (bb & shift::pawn_attack::<C>(bb)).count() as i16 * PROTECTED;
+
+        // Punish double pawns
+        score += (bb & C::up().shift(bb)).count() as i16 * DOUBLED;
+
+        // let forward = Offset::<0, -7>.shift(!shift::ray(shift::No, bb, !Bitboard(0)));
+        //let forward = shift::ray(shift::No, bb, !Bitboard(0));
+
+        //eprintln!("{forward:b}");
+        
+        score
+    }
+
+    // Used only in parse
     pub fn square_scores(&self) -> i16 {
         let phase = self.phase();
         let data = GlobalData::get();
@@ -462,11 +501,15 @@ impl Position {
         score
     }
 
+    pub fn all_material(&self) -> i16 {
+        self.state().material.iter().sum::<i16>() - 2 * Kind::King.value()
+    }
+
     pub fn phase(&self) -> Phase {
         const MIDGAME: i16 = 3700;
         const ENDGAME: i16 = 1000;
 
-        match self.state().material.iter().sum::<i16>() - 2 * Kind::King.value() {
+        match self.all_material() {
             MIDGAME.. => Phase::Opening,
             ENDGAME..MIDGAME => Phase::Middle,
             ..ENDGAME => Phase::Endgame,

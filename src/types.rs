@@ -298,7 +298,7 @@ impl Kind {
         }
     }
 
-    pub fn value(self) -> i16 {
+    pub const fn value(self) -> i16 {
         match self {
             Self::Pawn => 100,
             Self::Knight | Self::Bishop => 300,

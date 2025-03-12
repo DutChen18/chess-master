@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs};
+use std::collections::HashMap;
 use crate::{r#move::Move, position::Position};
 
 pub struct Book {
@@ -6,10 +6,12 @@ pub struct Book {
 }
 
 impl Book {
-    const PATH: &'static str = "book";
+    const _PATH: &'static str = "book";
 
     pub fn new() -> Self {
-        let mut openings = HashMap::new();
+        let openings = HashMap::new();
+
+        /*
         let content = fs::read_to_string(Self::PATH).expect("Missing opening book");
         let mut position = Position::new();
 
@@ -24,13 +26,12 @@ impl Book {
                 openings.insert(position.hash(), m);                
             }
         }
+        */
 
         Self { openings }
     }
 
     pub fn next(&self, position: &Position) -> Option<Move> {
-        let _ret = self.openings.get(&position.hash()).copied();
-
-        return None;
+        self.openings.get(&position.hash()).copied()
     }
 }
