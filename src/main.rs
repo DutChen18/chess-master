@@ -16,6 +16,8 @@ pub mod shift;
 pub mod tt;
 pub mod types;
 pub mod zobrist;
+pub mod book;
+pub mod pick;
 
 fn main() {
     let mut engine = Engine::new();

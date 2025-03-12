@@ -261,6 +261,13 @@ impl Color {
     pub fn from_str(s: &str) -> Self {
         Self::from_char(s.chars().nth(0).unwrap())
     }
+
+    pub fn sign(self) -> i16 {
+        match self {
+            Self::White => 1,
+            Self::Black => -1,
+        }
+    }
 }
 
 impl Kind {
@@ -280,7 +287,7 @@ impl Kind {
         Self::from_char(s.chars().nth(0).unwrap())
     }
 
-    pub fn to_char(&self) -> char {
+    pub fn to_char(self) -> char {
         match self {
             Self::Pawn => 'p',
             Self::Knight => 'n',
@@ -291,7 +298,7 @@ impl Kind {
         }
     }
 
-    pub fn value(&self) -> i16 {
+    pub fn value(self) -> i16 {
         match self {
             Self::Pawn => 100,
             Self::Knight | Self::Bishop => 300,
@@ -329,8 +336,8 @@ impl Piece {
     pub fn from_str(s: &str) -> Self {
         Self::from_char(s.chars().nth(0).unwrap())
     }
-    
-    pub fn to_char(&self) -> char {
+
+    pub fn to_char(self) -> char {
         let c = self.kind().to_char();
 
         match self.color() {
@@ -359,7 +366,7 @@ impl File {
         Self::from_char(s.chars().nth(0).unwrap())
     }
 
-    pub fn to_char(&self) -> char {
+    pub fn to_char(self) -> char {
         match self {
             Self::A => 'a',
             Self::B => 'b',
@@ -392,7 +399,7 @@ impl Rank {
         Self::from_char(s.chars().nth(0).unwrap())
     }
 
-    pub fn to_char(&self) -> char {
+    pub fn to_char(self) -> char {
         match self {
             Self::_1 => '1',
             Self::_2 => '2',
@@ -484,11 +491,21 @@ impl fmt::Display for Square {
 
 impl fmt::Display for CastlingRights {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.has(Self::WHITE_SHORT) { write!(f, "K")?; }
-        if self.has(Self::WHITE_LONG) { write!(f, "Q")?; }
-        if self.has(Self::BLACK_SHORT) { write!(f, "k")?; }
-        if self.has(Self::BLACK_LONG) { write!(f, "q")?; }
-        if *self == Self::NONE { write!(f, "-")?; }
+        if self.has(Self::WHITE_SHORT) {
+            write!(f, "K")?;
+        }
+        if self.has(Self::WHITE_LONG) {
+            write!(f, "Q")?;
+        }
+        if self.has(Self::BLACK_SHORT) {
+            write!(f, "k")?;
+        }
+        if self.has(Self::BLACK_LONG) {
+            write!(f, "q")?;
+        }
+        if *self == Self::NONE {
+            write!(f, "-")?;
+        }
 
         Ok(())
     }

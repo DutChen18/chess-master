@@ -108,8 +108,11 @@ pub fn generate<C: ConstColor, const QUIET: bool>(list: &mut impl MoveList, posi
     }
 
     attacked |= shift::pawn_attack::<C::Opponent>(opp_pawn);
-    attacked |= shift::knight_attack(opp_knight);
     attacked |= attack.king(opp_king);
+
+    for knight in opp_knight {
+        attacked |= attack.knight(knight);
+    }
 
     let king_bb = Bitboard::from(own_king);
 

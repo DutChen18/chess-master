@@ -40,7 +40,7 @@ impl AttackTable {
                     {
                         let mut all = reachable_square & reachable_other;
 
-                        *square.index_mut(other.index_mut(&mut line)) = all;
+                        *square.index_mut(other.index_mut(&mut line)) |= all;
 
                         for s in all.clone() {
                             // Remove squares not between points
@@ -49,7 +49,7 @@ impl AttackTable {
                             }
                         }
 
-                        *square.index_mut(other.index_mut(&mut between)) = all;
+                        *square.index_mut(other.index_mut(&mut between)) |= all;
                     }
                 }
             }

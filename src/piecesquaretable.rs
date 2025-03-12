@@ -18,6 +18,18 @@ impl PieceSquareTable {
     ];
     
     #[rustfmt::skip]
+    const PAWN_END: [i16; 64] = [
+         0,  0,  0,  0,  0,  0,  0,  0,
+        50, 50, 50, 50, 50, 50, 50, 50,
+        40, 40, 40, 40, 40, 40, 40, 40,
+        30, 30, 30, 30, 30, 30, 30, 30,  
+        20, 20, 20, 20, 20, 20, 20, 20,  
+        10, 10, 10, 10, 10, 10, 10, 10,  
+         0,  0,  0,  0,  0,  0,  0,  0,  
+         0,  0,  0,  0,  0,  0,  0,  0
+    ];
+    
+    #[rustfmt::skip]
     const KNIGHT: [i16; 64] = [
         -50,-40,-30,-30,-30,-30,-40,-50,
         -40,-20,  0,  0,  0,  0,-20,-40,
@@ -103,6 +115,7 @@ impl PieceSquareTable {
         }
 
         *Kind::King.index_mut(Phase::Endgame.index_mut(&mut black)) = Self::KING_END;
+        *Kind::Pawn.index_mut(Phase::Endgame.index_mut(&mut black)) = Self::PAWN_END;
 
         // Swap black value for white
         for phase in Phase::iter() {

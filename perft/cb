@@ -7,7 +7,6 @@ a1e1: 1
 a3a4: 1
 b2b3: 1
 b2b4: 1
-bestmove f3e5
 c3a2: 1
 c3a4: 1
 c3b1: 1
@@ -46,4 +45,3 @@ g5h4: 1
 g5h6: 1
 h2h3: 1
 h2h4: 1
-info depth 1 time 0 score cp 30 pv f3e5

@@ -3,12 +3,13 @@ use std::{env, path::Path};
 
 use crate::{
     gen::*, position::Position, r#move::Move, search, searchlimits::SearchLimits,
-    tt::TranspositionTable,
+    tt::TranspositionTable, book::Book,
 };
 
 pub struct Engine {
     position: Position,
     tt: TranspositionTable,
+    book: Book,
     age: u32,
 }
 
@@ -20,6 +21,7 @@ impl Engine {
         Self {
             position: Position::new(),
             tt: TranspositionTable::new(),
+            book: Book::new(),
             age: 0,
         }
     }
@@ -38,6 +40,10 @@ impl Engine {
 
     pub fn tt_mut(&mut self) -> &mut TranspositionTable {
         &mut self.tt
+    }
+
+    pub fn book(&self) -> &Book {
+        &self.book
     }
 
     pub fn age(&self) -> u32 {
@@ -70,7 +76,6 @@ impl Engine {
                     "uci" => {
                         println!("id name {name}");
                         println!("id author {}", Self::AUTHOR);
-                        // println!("option name OwnBook");
                         println!("uciok");
                     }
                     "isready" => println!("readyok"),
@@ -137,7 +142,7 @@ impl Engine {
     }
 
     pub fn uci_perft(&mut self, words: &[&str]) {
-        let depth = words.iter().nth(1).map(|s| s.parse().unwrap()).unwrap_or(1);
+        let depth = words.first().map(|s| s.parse().unwrap()).unwrap_or(1);
 
         println!("Nodes searched: {}", self.perft(depth, true));
     }

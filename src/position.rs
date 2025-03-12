@@ -1,5 +1,6 @@
+use crate::bitboard::Bitboard;
 use crate::r#move::Move;
-use crate::types::{CastlingRights, Color, File, Kind, Piece, Rank, Square, Phase};
+use crate::types::{CastlingRights, Color, File, Kind, Phase, Piece, Rank, Square};
 use crate::{board::Board, global::GlobalData};
 
 use std::ops::Deref;
@@ -10,6 +11,9 @@ pub struct State {
     castling_rights: CastlingRights,
     en_passant: Option<Square>,
     halfmove_clock: u32,
+
+    material: [i16; Color::COUNT],
+    square_score: i16,
 }
 
 pub struct UndoState {
@@ -35,6 +39,7 @@ impl Position {
         let zobrist = GlobalData::get().zobrist();
         let mut board = Board::empty();
         let mut hash = 0;
+        let mut material = [0, 0];
 
         for (rank, string) in Rank::iter().rev().zip(fen[0].split("/")) {
             let mut files = File::iter();
@@ -50,6 +55,7 @@ impl Position {
 
                     board.set(square, Some(piece));
                     hash ^= zobrist.piece(piece, square);
+                    *piece.color().index_mut(&mut material) += piece.kind().value();
                 }
             }
         }
@@ -82,13 +88,19 @@ impl Position {
             castling_rights,
             en_passant,
             halfmove_clock,
+            square_score: 0,
+            material,
         };
 
-        Self {
+        let mut position = Self {
             board,
             ply,
             states: vec![state],
-        }
+        };
+
+        position.states.last_mut().unwrap().square_score = position.square_scores();
+
+        position
     }
 
     pub fn fen(&self) -> String {
@@ -179,6 +191,9 @@ impl Position {
         let mut state = self.states.last().unwrap().clone();
         let piece = self.board.get(r#move.from()).unwrap();
         let mut capture = self.board.get(r#move.to());
+        let mut phase = self.phase();
+        let data = GlobalData::get();
+        let table = data.square();
 
         self.board.set(r#move.from(), None);
         self.board.set(r#move.to(), Some(piece));
@@ -186,9 +201,13 @@ impl Position {
         state.hash ^= zobrist.piece(piece, r#move.from());
         state.hash ^= zobrist.piece(piece, r#move.to());
 
+        state.square_score -= table.get(piece, r#move.from(), phase) * piece.color().sign();
+
         // Capture
         if let Some(captured) = capture {
             state.hash ^= zobrist.piece(captured, r#move.to());
+
+            *captured.color().index_mut(&mut state.material) -= captured.kind().value();
         }
 
         // Promotion
@@ -199,7 +218,14 @@ impl Position {
 
             state.hash ^= zobrist.piece(piece, r#move.to());
             state.hash ^= zobrist.piece(promoted, r#move.to());
+
+            *piece.color().index_mut(&mut state.material) -= piece.kind().value();
+            *piece.color().index_mut(&mut state.material) += promotion.value();
         }
+
+        phase = self.phase();
+
+        state.square_score += table.get(piece, r#move.to(), phase) * piece.color().sign();
 
         // Move rook when castling
         if piece.kind() == Kind::King {
@@ -215,6 +241,11 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::H1);
                         state.hash ^= zobrist.piece(rook, Square::F1);
+
+                        state.square_score -=
+                            table.get(rook, Square::H1, phase) * rook.color().sign();
+                        state.square_score +=
+                            table.get(rook, Square::F1, phase) * rook.color().sign();
                     }
 
                     if state.castling_rights.has(CastlingRights::WHITE_LONG)
@@ -225,6 +256,11 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::A1);
                         state.hash ^= zobrist.piece(rook, Square::D1);
+
+                        state.square_score -=
+                            table.get(rook, Square::A1, phase) * rook.color().sign();
+                        state.square_score +=
+                            table.get(rook, Square::D1, phase) * rook.color().sign();
                     }
                 }
                 Color::Black => {
@@ -236,6 +272,11 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::H8);
                         state.hash ^= zobrist.piece(rook, Square::F8);
+
+                        state.square_score -=
+                            table.get(rook, Square::H8, phase) * rook.color().sign();
+                        state.square_score +=
+                            table.get(rook, Square::F8, phase) * rook.color().sign();
                     }
 
                     if state.castling_rights.has(CastlingRights::BLACK_LONG)
@@ -246,6 +287,11 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::A8);
                         state.hash ^= zobrist.piece(rook, Square::D8);
+
+                        state.square_score -=
+                            table.get(rook, Square::A8, phase) * rook.color().sign();
+                        state.square_score +=
+                            table.get(rook, Square::D8, phase) * rook.color().sign();
                     }
                 }
             }
@@ -261,6 +307,8 @@ impl Position {
             capture = Some(Piece::new(!self.turn(), Kind::Pawn));
 
             state.hash ^= zobrist.piece(captured, taken);
+
+            state.square_score -= table.get(captured, taken, phase) * captured.color().sign();
         }
 
         if let Some(ep) = state.en_passant {
@@ -373,27 +421,56 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
-        let mut scores: [i16; Color::COUNT] = [0; Color::COUNT];
-        let data = GlobalData::get();
-        let table = data.square();
-        let phase = self.phase();
+        let scores = self.state().material;
 
-        for piece in Piece::iter() {
-            let score: &mut i16 = piece.color().index_mut(&mut scores);
-            let bb = self.board.piece_bb(piece);
+        (self.turn().index(&scores) - (!self.turn()).index(&scores))
+            + self.state().square_score * self.turn().sign()
+            + self.evaluate_pawn_structure()
+    }
 
-            // Material score
-            *score += bb.count() as i16 * piece.kind().value();
+    pub fn evaluate_pawn_structure(&self) -> i16 {
+        let mut score = 0;
 
-            // Square score 
-            *score += bb.map(|square| table.get(piece, square, phase)).sum::<i16>();
+        for color in Color::iter() {
+            let bb = self.board.color_kind_bb(color, Kind::Pawn);
+
+            // Punish double pawns
+            for file in File::iter() {
+                if (Bitboard::from(file) & bb).count() >= 2 {
+                    score -= 50 * color.sign();
+                }
+            }
         }
 
-        self.turn().index(&scores) - (!self.turn()).index(&scores)
+        score
+    }
+
+    pub fn square_scores(&self) -> i16 {
+        let phase = self.phase();
+        let data = GlobalData::get();
+        let table = data.square();
+        let mut score = 0;
+
+        for piece in Piece::iter() {
+            let bb = self.board.piece_bb(piece);
+
+            score += bb
+                .map(|square| table.get(piece, square, phase) * piece.color().sign())
+                .sum::<i16>();
+        }
+
+        score
     }
 
     pub fn phase(&self) -> Phase {
-        Phase::Middle
+        const MIDGAME: i16 = 3700;
+        const ENDGAME: i16 = 1000;
+
+        match self.state().material.iter().sum::<i16>() - 2 * Kind::King.value() {
+            MIDGAME.. => Phase::Opening,
+            ENDGAME..MIDGAME => Phase::Middle,
+            ..ENDGAME => Phase::Endgame,
+        }
     }
 }
 
@@ -437,7 +514,11 @@ mod tests {
     #[test]
     fn fen() {
         for fen in FENS {
-            let array: [&str; 6] = fen.split_whitespace().collect::<Vec<&str>>().try_into().unwrap();
+            let array: [&str; 6] = fen
+                .split_whitespace()
+                .collect::<Vec<&str>>()
+                .try_into()
+                .unwrap();
 
             assert!(fen == Position::parse(&array).fen());
         }
@@ -450,7 +531,7 @@ mod tests {
 
         for _ in 0..DEPTH {
             let mut moves = MoveVec::new();
-            
+
             generate_dyn::<true>(&mut moves, &position);
 
             let m = *moves.moves().choose(&mut rng).unwrap();
@@ -460,7 +541,11 @@ mod tests {
             position.make(m);
 
             let f = position.fen();
-            let fen: [&str; 6] = f.split_whitespace().collect::<Vec<&str>>().try_into().unwrap();
+            let fen: [&str; 6] = f
+                .split_whitespace()
+                .collect::<Vec<&str>>()
+                .try_into()
+                .unwrap();
             let cpy = Position::parse(&fen);
 
             assert!(position.hash() == cpy.hash());

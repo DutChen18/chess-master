@@ -3,143 +3,60 @@ use std::{collections::HashSet, time::Instant};
 use crate::{
     engine::Engine,
     gen::{self, MoveVec},
-    global::GlobalData,
+    pick::Pick,
     r#move::Move,
     tt::{Bound, Entry},
-    types::Color,
 };
 
 const MIN_SCORE: i16 = i16::MIN + 1;
 const MAX_SCORE: i16 = i16::MAX;
+const MATE_SCORE: i16 = MAX_SCORE / 2;
 
-pub fn sort_moves(engine: &mut Engine, moves: &mut [Move]) {
-    let piece_square = GlobalData::get().square();
-    let phase = engine.position().phase();
-
-    moves.sort_unstable_by_key(|r#move| {
-        let piece = engine.position().get(r#move.from()).unwrap();
-
-        if let Some(capture) = engine.position().get(r#move.to()) {
-            const VALUE: [i32; 6] = [0, 1, 2, 3, 4, 5];
-
-            return *piece.kind().index(&VALUE) * 6 + 5 - *capture.kind().index(&VALUE);
-        }
-
-        200 + (piece_square.get(piece, r#move.from(), phase) - piece_square.get(piece, r#move.to(), phase)) as i32
-    });
+struct Stats {
+    root_ply: u32,
+    best_index_distribution: Vec<usize>,
 }
 
-pub fn quiesce(engine: &mut Engine, mut alpha: i16, beta: i16) -> i16 {
-    let static_score = engine.position().evaluate();
-    let mut best_score = static_score;
 
-    if static_score >= beta {
-        return static_score;
-    } else if alpha < static_score {
-        alpha = static_score;
-    }
-
-    let mut moves = MoveVec::new();
-
-    // TODO: also do checks in quiescence search
-
-    gen::generate_dyn::<false>(&mut moves, engine.position());
-
-    for r#move in moves.moves() {
-        let undo = engine.position_mut().make(*r#move);
-        let score = -quiesce(engine, -beta, -alpha);
-
-        engine.position_mut().unmake(undo);
-
-        if score >= beta {
-            return score;
-        }
-
-        if score > best_score {
-            best_score = score;
-        }
-
-        if score > alpha {
-            alpha = score;
-        }
-    }
-
-    return best_score;
-}
-
-pub fn alpha_beta(
-    engine: &mut Engine,
-    end: Instant,
-    mut alpha: i16,
-    beta: i16,
-    depth: u16,
-) -> Option<i16> {
-    if depth == 0 {
-        // return Some(engine.position().evaluate());
-        return Some(quiesce(engine, alpha, beta));
-    } else if depth >= 4 && Instant::now() >= end {
-        return None;
-    }
-
-    let mut moves = MoveVec::new();
-    let mut best_score = MIN_SCORE;
+// TODO: also do checks in quiescence search
+fn quiesce(engine: &mut Engine, stats: &mut Stats, mut alpha: i16, beta: i16) -> i16 {
     let mut best_move = Move::null();
+    let mut best_index = None;
     let mut bound = Bound::Upper;
+    let mut pick = Pick::new::<false>(engine);
 
-    let hash = engine.position().hash();
-    let entry = engine.tt().probe(hash);
-
-    gen::generate_dyn::<true>(&mut moves, engine.position());
-
-    if moves.moves().is_empty() {
-        if moves.check() {
-            best_score = MIN_SCORE + engine.position().ply() as i16;
-        } else {
-            best_score = 0;
-        }
-    }
-
-    let mut tt_hit = false;
-
-    if let Some(entry) = entry {
-        if let Some(index) = moves
-            .moves()
-            .iter()
-            .position(|r#move| *r#move == entry.r#move())
-        {
-            moves.moves_mut().swap(0, index);
-            tt_hit = true;
-        }
-
+    let mut best_score = if let Some(entry) = pick.entry() {
         if match entry.bound() {
             Bound::Exact => true,
             Bound::Lower => entry.score() >= beta,
             Bound::Upper => entry.score() < alpha,
-        } && entry.depth() >= depth
-            && tt_hit
-        {
-            return Some(entry.score());
-        }
-    }
-
-    if !tt_hit {
-        sort_moves(engine, moves.moves_mut());
-    }
-
-    for i in 0..moves.moves().len() {
-        if tt_hit && i == 1 {
-            sort_moves(engine, &mut moves.moves_mut()[1..]);
+        } {
+            return entry.score();
         }
 
-        let r#move = moves.moves()[i];
+        entry.score()
+    } else {
+        engine.position().evaluate()
+    };
+
+    if best_score > alpha {
+        alpha = best_score;
+    }
+
+    if best_score >= beta {
+        return best_score;
+    }
+
+    while let Some((i, r#move)) = pick.next(engine) {
         let undo = engine.position_mut().make(r#move);
-        let score = -alpha_beta(engine, end, -beta, -alpha, depth - 1)?;
+        let score = -quiesce(engine, stats, -beta, -alpha);
 
         engine.position_mut().unmake(undo);
 
         if score > best_score {
             best_score = score;
             best_move = r#move;
+            best_index = Some(i);
 
             if score > alpha {
                 alpha = score;
@@ -149,53 +66,113 @@ pub fn alpha_beta(
 
         if score >= beta {
             bound = Bound::Lower;
+
             break;
         }
     }
 
+    let hash = engine.position().hash();
+    let age = engine.age();
+
+    engine
+        .tt_mut()
+        .insert(Entry::new(hash, age, best_move, 0, best_score, bound));
+
+    if let Some(best_index) = best_index {
+        if best_index >= stats.best_index_distribution.len() {
+            stats.best_index_distribution.resize(best_index + 1, 0);
+        }
+
+        stats.best_index_distribution[best_index] += 1;
+    }
+
+    return best_score;
+}
+
+fn alpha_beta(
+    engine: &mut Engine,
+    stats: &mut Stats,
+    end: Instant,
+    mut alpha: i16,
+    beta: i16,
+    depth: u16,
+) -> Option<i16> {
+    // TODO: aspiration windows
+
+    if depth == 0 {
+        return Some(quiesce(engine, stats, alpha, beta));
+    } else if depth >= 4 && Instant::now() >= end {
+        return None;
+    }
+
+    let mut best_score = MIN_SCORE;
+    let mut best_move = Move::null();
+    let mut best_index = None;
+    let mut bound = Bound::Upper;
+    let mut pick = Pick::new::<true>(engine);
+
+    if pick.is_empty() {
+        if pick.check() {
+            return Some(MIN_SCORE + (engine.position().ply() - stats.root_ply) as i16);
+        } else {
+            return Some(0);
+        }
+    }
+
+    if let Some(entry) = pick.entry() {
+        if match entry.bound() {
+            Bound::Exact => true,
+            Bound::Lower => entry.score() >= beta,
+            Bound::Upper => entry.score() < alpha,
+        } && entry.depth() >= depth
+        {
+            return Some(entry.score());
+        }
+    }
+
+    while let Some((i, r#move)) = pick.next(engine) {
+        let undo = engine.position_mut().make(r#move);
+        let score = -alpha_beta(engine, stats, end, -beta, -alpha, depth - 1)?;
+
+        engine.position_mut().unmake(undo);
+
+        if score > best_score {
+            best_score = score;
+            best_move = r#move;
+            best_index = Some(i);
+
+            if score > alpha {
+                alpha = score;
+                bound = Bound::Exact;
+            }
+        }
+
+        if score >= beta {
+            bound = Bound::Lower;
+
+            break;
+        }
+    }
+
+    let hash = engine.position().hash();
     let age = engine.age();
 
     engine
         .tt_mut()
         .insert(Entry::new(hash, age, best_move, depth, best_score, bound));
 
+    if let Some(best_index) = best_index {
+        if best_index >= stats.best_index_distribution.len() {
+            stats.best_index_distribution.resize(best_index + 1, 0);
+        }
+
+        stats.best_index_distribution[best_index] += 1;
+    }
+
     Some(best_score)
 }
 
-pub fn search(engine: &mut Engine, end: Instant) -> Move {
-    let start = Instant::now();
-    let mut best_move = Move::null();
-
-    for depth in 1.. {
-        let Some(mut score) = alpha_beta(engine, end, MIN_SCORE, MAX_SCORE, depth) else {
-            break;
-        };
-
-        let ms = start.elapsed().as_millis();
-        let mut pv = Vec::new();
-        let mut visited = HashSet::new();
-
-        if engine.position().turn() == Color::Black {
-            score = -score;
-        }
-
-        get_pv(engine, &mut pv, &mut visited);
-
-        best_move = pv[0];
-
-        print!("info depth {depth} time {ms} score cp {score} pv");
-
-        for r#move in pv {
-            print!(" {}", r#move);
-        }
-
-        println!();
-    }
-
-    best_move
-}
-
-pub fn get_pv(engine: &mut Engine, pv: &mut Vec<Move>, visited: &mut HashSet<u64>) {
+fn get_pv(engine: &mut Engine, pv: &mut Vec<Move>, visited: &mut HashSet<u64>) {
     let hash = engine.position().hash();
 
     if visited.contains(&hash) {
@@ -218,4 +195,66 @@ pub fn get_pv(engine: &mut Engine, pv: &mut Vec<Move>, visited: &mut HashSet<u64
             engine.position_mut().unmake(undo);
         }
     }
+}
+
+pub fn search(engine: &mut Engine, end: Instant) -> Move {
+    if let Some(r#move) = engine.book().next(engine.position()) {
+        return r#move;
+    }
+
+    let start = Instant::now();
+    let mut best_move = Move::null();
+
+    for depth in 1.. {
+        let mut stats = Stats {
+            root_ply: engine.position().ply(),
+            best_index_distribution: Vec::new(),
+        };
+
+        let Some(score) = alpha_beta(engine, &mut stats, end, MIN_SCORE, MAX_SCORE, depth) else {
+            break;
+        };
+
+        let ms = start.elapsed().as_millis();
+        let mut pv = Vec::new();
+        let mut visited = HashSet::new();
+
+        get_pv(engine, &mut pv, &mut visited);
+
+        best_move = pv[0];
+
+        print!("info depth {depth} time {ms} score ");
+
+        if score.abs() > MATE_SCORE {
+            if score > 0 {
+                print!("mate {}", (MAX_SCORE - score + 1) / 2);
+            } else {
+                print!("mate {}", (MIN_SCORE - score) / 2);
+            }
+        } else {
+            print!("cp {score}");
+        }
+
+        print!(" pv");
+
+        for r#move in pv {
+            print!(" {}", r#move);
+        }
+
+        println!();
+
+        let total: usize = stats.best_index_distribution.iter().sum();
+
+        eprintln!(
+            "{:.03?}",
+            stats
+                .best_index_distribution
+                .iter()
+                .take(10)
+                .map(|count| *count as f64 / total as f64)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    best_move
 }
