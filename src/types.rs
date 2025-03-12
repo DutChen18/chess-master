@@ -196,6 +196,7 @@ pub trait ConstColor {
     fn up_up() -> impl Shift;
     fn up_left() -> impl Shift;
     fn up_right() -> impl Shift;
+    fn down() -> impl Shift;
 }
 
 pub struct ConstWhite;
@@ -223,6 +224,10 @@ impl ConstColor for ConstWhite {
     fn up_right() -> impl Shift {
         Offset::<1, 1>
     }
+
+    fn down() -> impl Shift {
+        Offset::<0, -1>
+    }
 }
 
 impl ConstColor for ConstBlack {
@@ -246,6 +251,10 @@ impl ConstColor for ConstBlack {
 
     fn up_right() -> impl Shift {
         Offset::<1, -1>
+    }
+
+    fn down() -> impl Shift {
+        Offset::<0, 1>
     }
 }
 

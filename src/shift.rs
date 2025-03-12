@@ -140,3 +140,8 @@ pub fn rook_ray(bb: Bitboard, empty: Bitboard) -> Bitboard {
 
     n | e | s | w
 }
+
+pub fn queen_ray(bb: Bitboard, empty: Bitboard) -> Bitboard {
+    bishop_ray(bb, empty) | rook_ray(bb, empty)
+}
+

@@ -36,7 +36,11 @@ impl Position {
     pub const STARTPOS: &'static str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
     pub fn new() -> Self {
-        Self::parse(&Self::STARTPOS.split(" ").collect::<Vec<_>>())
+        Self::from_str(Self::STARTPOS)
+    }
+    
+    pub fn from_str(fen: &str) -> Self {
+        Self::parse(&fen.split(" ").collect::<Vec<_>>())
     }
 
     pub fn parse(fen: &[&str]) -> Self {
@@ -180,6 +184,22 @@ impl Position {
 
     pub fn ply(&self) -> u32 {
         self.ply
+    }
+
+    pub fn is_technical_draw(&self) -> bool {
+        let (last, rest) = self.states.split_last().unwrap();
+
+        if last.halfmove_clock >= 100 {
+            return true;
+        }
+
+        for state in &rest[rest.len().saturating_sub(last.halfmove_clock as usize)..] {
+            if state.hash == last.hash {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     pub fn turn(&self) -> Color {
@@ -448,7 +468,9 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
-        (self.state().square_score + self.evaluate_side::<ConstWhite>() - self.evaluate_side::<ConstBlack>()) * self.turn().sign()
+        (self.state().square_score + self.evaluate_side::<ConstWhite>()
+            - self.evaluate_side::<ConstBlack>())
+            * self.turn().sign()
     }
 
     pub fn evaluate_side<C: ConstColor>(&self) -> i16 {
@@ -456,6 +478,8 @@ impl Position {
 
         score += C::color().index(&self.state().material);
         score += self.evaluate_pawn_structure::<C>();
+        //score += self.king_safety::<C>();
+        //score += self.pawn_adjustment::<C>();
 
         score
     }
@@ -475,11 +499,61 @@ impl Position {
         // Punish double pawns
         score += (bb & C::up().shift(bb)).count() as i16 * DOUBLED;
 
-        // let forward = Offset::<0, -7>.shift(!shift::ray(shift::No, bb, !Bitboard(0)));
-        //let forward = shift::ray(shift::No, bb, !Bitboard(0));
+        // Punish isolated pawns
+        let lines = shift::ray(shift::So, shift::ray(shift::No, bb, !Bitboard(0)), !Bitboard(0));
+        let nb = Offset::<-1, 0>.shift(lines) | Offset::<1, 0>.shift(lines);
+        let one = Into::<Bitboard>::into(Rank::_1) & (!nb & lines);
 
-        //eprintln!("{forward:b}");
-        
+        score += one.count() as i16 * ISOLATED;
+
+        score
+    }
+
+    pub fn king_safety<C: ConstColor>(&self) -> i16 {
+        const SHIELD: i16 = 20;
+        const STORM: i16 = -10;
+
+        let mut score = 0;
+
+        let sides = !(Into::<Bitboard>::into(File::D) | Into::<Bitboard>::into(File::E));
+        let king = self.board.color_kind_bb(C::color(), Kind::King);
+        let mut pawns = sides & self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let mut bb = king & sides;
+
+        // Pawn shield
+        bb |= Offset::<-1, 0>.shift(bb) | Offset::<1, 0>.shift(bb);
+        bb |= C::up().shift(bb);
+        bb |= C::up().shift(bb);
+
+        score += (bb & pawns).count() as i16 * SHIELD;
+
+        // Pawn storm
+        pawns = sides & self.board.color_kind_bb(!C::color(), Kind::Pawn);
+        bb |= C::up().shift(bb);
+        bb |= C::up().shift(bb);
+
+        score += (bb & pawns).count() as i16 * STORM;
+
+        score
+    }
+
+    pub fn pawn_adjustment<C: ConstColor>(&self) -> i16 {
+        // CP adjustment per pawn present
+        const KNIGHT: i16 = 5;
+        const ROOK: i16 = -5;
+        const QUEEN: i16 = -10;
+
+        let mut score = 0;
+
+        let pawns = self.board.kind_bb(Kind::Pawn);
+        let knights = self.board.color_kind_bb(C::color(), Kind::Knight);
+        let rooks = self.board.color_kind_bb(C::color(), Kind::Rook);
+        let queen = self.board.color_kind_bb(C::color(), Kind::Queen);
+
+        score += pawns.count() as i16 * knights.count() as i16 * KNIGHT;
+        score += pawns.count() as i16 * rooks.count() as i16 * ROOK;
+        score += pawns.count() as i16 * queen.count() as i16 * QUEEN;
+
         score
     }
 

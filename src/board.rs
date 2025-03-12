@@ -38,7 +38,6 @@ impl Board {
         }
     }
 
-
     pub fn color_bb(&self, color: Color) -> Bitboard {
         *color.index(&self.color_bb)
     }

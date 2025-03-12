@@ -135,7 +135,7 @@ impl Generator {
         self.checkers
     }
 
-    pub fn generate<C: ConstColor, const QUIET: bool>(
+    pub fn generate<C: ConstColor, const QUIET: bool, const CHECKS: bool>(
         &self,
         list: &mut impl MoveList,
         position: &Position,
@@ -144,6 +144,7 @@ impl Generator {
         let attack = self.global.attack();
 
         let own_king = position.king_square(C::color());
+        let opp_king = position.king_square(C::opponent());
         let own = position.color_bb(C::color());
         let opp = position.color_bb(C::opponent());
         let occupied = own | opp;
@@ -164,8 +165,20 @@ impl Generator {
             target |= attack.between(own_king, checker);
         }
 
-        if !QUIET {
+        if !QUIET && !CHECKS {
             target &= opp;
+        }
+
+        let mut pawn_target = target;
+        let mut knight_target = target;
+        let mut bishop_target = target;
+        let mut rook_target = target;
+
+        if !QUIET && CHECKS {
+            pawn_target &= opp | attack.pawn(opp_king, C::opponent());
+            knight_target &= opp | attack.knight(opp_king);
+            bishop_target &= opp | magic.bishop(opp_king, occupied);
+            rook_target &= opp | magic.rook(opp_king, occupied);
         }
 
         // Not in check
@@ -202,7 +215,7 @@ impl Generator {
                 generate_pawn_bb::<C>(
                     list,
                     pawn,
-                    (up | up_up | up_side) & target & attack.line(own_king, pawn),
+                    (up | up_up | up_side) & pawn_target & attack.line(own_king, pawn),
                 );
             }
 
@@ -210,7 +223,7 @@ impl Generator {
             for bishop in own_bishop & self.pinned {
                 list.add_bb::<false>(
                     bishop,
-                    magic.bishop(bishop, occupied) & target & attack.line(own_king, bishop),
+                    magic.bishop(bishop, occupied) & bishop_target & attack.line(own_king, bishop),
                 );
             }
 
@@ -218,7 +231,7 @@ impl Generator {
             for rook in own_rook & self.pinned {
                 list.add_bb::<false>(
                     rook,
-                    magic.rook(rook, occupied) & target & attack.line(own_king, rook),
+                    magic.rook(rook, occupied) & rook_target & attack.line(own_king, rook),
                 );
             }
         }
@@ -244,10 +257,10 @@ impl Generator {
         let up_left = C::up_left().shift(bb) & opp;
         let up_right = C::up_right().shift(bb) & opp;
 
-        generate_pawn_shift::<C>(list, &C::up(), up & target);
-        generate_pawn_shift::<C>(list, &C::up_up(), up_up & target);
-        generate_pawn_shift::<C>(list, &C::up_left(), up_left & target);
-        generate_pawn_shift::<C>(list, &C::up_right(), up_right & target);
+        generate_pawn_shift::<C>(list, &C::up(), up & pawn_target);
+        generate_pawn_shift::<C>(list, &C::up_up(), up_up & pawn_target);
+        generate_pawn_shift::<C>(list, &C::up_left(), up_left & pawn_target);
+        generate_pawn_shift::<C>(list, &C::up_right(), up_right & pawn_target);
 
         // En passant moves
         if let Some(to) = position.en_passant() {
@@ -268,30 +281,34 @@ impl Generator {
 
         // Knight moves
         for knight in own_knight & !self.pinned {
-            list.add_bb::<false>(knight, attack.knight(knight) & target);
+            list.add_bb::<false>(knight, attack.knight(knight) & knight_target);
         }
 
         // Bishop moves
         for bishop in own_bishop & !self.pinned {
-            list.add_bb::<false>(bishop, magic.bishop(bishop, occupied) & target);
+            list.add_bb::<false>(bishop, magic.bishop(bishop, occupied) & bishop_target);
         }
 
         // Rook moves
         for rook in own_rook & !self.pinned {
-            list.add_bb::<false>(rook, magic.rook(rook, occupied) & target);
+            list.add_bb::<false>(rook, magic.rook(rook, occupied) & rook_target);
         }
     }
 
-    pub fn generate_dyn<const QUIET: bool>(&self, list: &mut impl MoveList, position: &Position) {
+    pub fn generate_dyn<const QUIET: bool, const CHECKS: bool>(
+        &self,
+        list: &mut impl MoveList,
+        position: &Position,
+    ) {
         match position.turn() {
-            Color::White => self.generate::<ConstWhite, QUIET>(list, position),
-            Color::Black => self.generate::<ConstBlack, QUIET>(list, position),
+            Color::White => self.generate::<ConstWhite, QUIET, CHECKS>(list, position),
+            Color::Black => self.generate::<ConstBlack, QUIET, CHECKS>(list, position),
         }
     }
 }
 
 pub fn generate_dyn<const QUIET: bool>(list: &mut impl MoveList, position: &Position) {
-    Generator::new_dyn(position).generate_dyn::<QUIET>(list, position);
+    Generator::new_dyn(position).generate_dyn::<QUIET, false>(list, position);
 }
 
 impl MoveVec {

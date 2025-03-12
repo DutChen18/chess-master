@@ -35,7 +35,7 @@ impl Iterator for Bitboard {
     type Item = Square;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let square = self.square(); 
+        let square = self.square();
         self.0 &= self.0.wrapping_sub(1);
         square
     }
@@ -47,8 +47,13 @@ impl Iterator for Bitboard {
 
 impl Binary for Bitboard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for i in 0..8 {
-            writeln!(f, "{:08b}", (self.0  >> (8 * i)) & 0xFF)?;
+        for rank in Rank::iter().rev() {
+            for file in File::iter() {
+                let square = Square::new(file, rank);
+
+                write!(f, "{}", match Into::<Bitboard>::into(square) & *self { Bitboard(0) => '0', _ => '1' })?;
+            }
+            writeln!(f, "")?;
         }
 
         Ok(())

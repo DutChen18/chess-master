@@ -7,7 +7,6 @@ pub struct SearchLimits {
     inc: [Duration; 2],
     movetime: Duration,
     depth: usize,
-    
     /*
     searchmoves: Vec<Move>,
     ponder: bool,
@@ -54,6 +53,11 @@ impl SearchLimits {
             return Instant::now() + self.movetime.mul_f32(0.9);
         }
 
-        Instant::now() + *color.index(&self.inc) + std::cmp::max(Duration::from_millis(100), color.index(&self.time).div_f32(50.0))
+        Instant::now()
+            + *color.index(&self.inc)
+            + std::cmp::max(
+                Duration::from_millis(100),
+                color.index(&self.time).div_f32(50.0),
+            )
     }
 }

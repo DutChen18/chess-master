@@ -23,7 +23,6 @@ pub struct Pick {
     moves: [MaybeUninit<MoveEntry>; MAX_MOVES],
     entry: Option<Entry>,
     attacked: Bitboard,
-    check: bool,
     capture_end: usize,
     quiet_start: usize,
     index: usize,
@@ -44,6 +43,7 @@ impl MoveList for PickList<'_> {
             return;
         }
 
+        // TODO: consider en-passant as capture
         if self.board.get(r#move.to()).is_some() {
             self.pick.moves[self.pick.capture_end].write(MoveEntry { r#move, score: 0 });
             self.pick.capture_end += 1;
@@ -55,17 +55,18 @@ impl MoveList for PickList<'_> {
 }
 
 impl Pick {
-    pub fn new<const QUIET: bool>(engine: &Engine) -> Self {
+    pub fn new<const QUIET: bool, const CHECKS: bool>(
+        engine: &Engine,
+        generator: &Generator,
+    ) -> Self {
         let hash = engine.position().hash();
         let entry = engine.tt().probe(hash);
         let tt_move = entry.map(|entry| entry.r#move()).unwrap_or_else(Move::null);
-        let generator = Generator::new_dyn(engine.position());
 
         let mut pick = Pick {
             moves: [const { MaybeUninit::uninit() }; MAX_MOVES],
             entry,
             attacked: generator.attacked(),
-            check: generator.checkers() != Bitboard(0),
             index: 0,
             capture_end: 0,
             quiet_start: MAX_MOVES,
@@ -78,7 +79,7 @@ impl Pick {
             board: engine.position(),
         };
 
-        generator.generate_dyn::<QUIET>(&mut pick_list, engine.position());
+        generator.generate_dyn::<QUIET, CHECKS>(&mut pick_list, engine.position());
 
         if !pick_list.tt_hit {
             pick.entry = None;
@@ -150,10 +151,6 @@ impl Pick {
 
     pub fn is_empty(&self) -> bool {
         self.entry.is_none() && self.capture_end == 0 && self.quiet_start == MAX_MOVES
-    }
-
-    pub fn check(&self) -> bool {
-        self.check
     }
 }
 

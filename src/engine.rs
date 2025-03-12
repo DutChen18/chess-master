@@ -3,8 +3,8 @@ use std::{env, path::Path};
 
 use crate::options::Options;
 use crate::{
-    gen::*, position::Position, r#move::Move, search, searchlimits::SearchLimits,
-    tt::TranspositionTable, book::Book,
+    book::Book, gen::*, position::Position, r#move::Move, search, searchlimits::SearchLimits,
+    tt::TranspositionTable,
 };
 
 pub struct Engine {
@@ -53,7 +53,7 @@ impl Engine {
         self.age
     }
 
-    pub fn uci_run(&mut self) {
+    pub fn run(&mut self) {
         let mut quit = false;
         let mut name = Self::NAME.to_string();
 
@@ -79,6 +79,7 @@ impl Engine {
                     "uci" => {
                         println!("id name {name}");
                         println!("id author {}", Self::AUTHOR);
+                        // println!("option name OwnBook value check");
                         println!("uciok");
                     }
                     "debug" => {
@@ -88,13 +89,13 @@ impl Engine {
                                 "off" => self.options.debug = false,
                                 _ => (),
                             }
-                        }   
+                        }
                     }
                     "isready" => println!("readyok"),
-                    "setoption" => todo!(),
+                    "setoption" => self.setoption(&words[1..]),
                     "ucinewgame" => self.position = Position::new(),
                     "position" => self.uci_position(&words[1..]),
-                    "go" => self.uci_go(&words[1..]),
+                    "go" => self.go(&words[1..]),
                     "quit" => quit = true,
                     "perft" => {
                         let start = Instant::now();
@@ -134,7 +135,7 @@ impl Engine {
         }
     }
 
-    pub fn uci_go(&mut self, words: &[&str]) {
+    pub fn go(&mut self, words: &[&str]) {
         if let Some(command) = words.first() {
             if *command == "perft" {
                 self.uci_perft(&words[1..]);
@@ -190,5 +191,34 @@ impl Engine {
         }
 
         total
+    }
+
+    pub fn setoption(&mut self, words: &[&str]) {
+        let mut it = words.into_iter().map(|&s| s);
+
+        if let Some(name) = Self::optionarg("name", &mut it) {
+            if let Some(value) = Self::optionarg("value", &mut it) {
+                match name {
+                    "OwnBook" => {
+                        match value {
+                            "true" => self.options.ownbook = true,
+                            "false" => self.options.ownbook = false,
+                            _ => (),
+                        }
+                    }
+                    _ => (),
+                }
+            }
+        }
+    }
+
+    pub fn optionarg<'a>(s: &str, it: &mut impl Iterator<Item = &'a str>) -> Option<&'a str> {
+        if let Some(what) = it.next() {
+            if what == s {
+                return it.next();
+            }
+        }
+
+        None
     }
 }
