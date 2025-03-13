@@ -14,7 +14,6 @@ const MIN_SCORE: i16 = -MAX_SCORE;
 const MATE_SCORE: i16 = MAX_SCORE / 2;
 
 struct Stats {
-    root_ply: u32,
     best_index_distribution: Vec<usize>,
 }
 
@@ -38,11 +37,6 @@ fn quiesce(
         Pick::new::<false, false>(engine, &generator)
     };
 
-    // TODO: fix
-
-    // let mut pick = 
-    //     Pick::new::<false, false>(engine, &generator);
-
     let mut best_score = if let Some(entry) = pick.entry() {
         // TT cut
         if match entry.bound() {
@@ -60,7 +54,7 @@ fn quiesce(
 
     if generator.checkers() != Bitboard(0) {
         if pick.is_empty() {
-            best_score = MIN_SCORE + (engine.position().ply() - stats.root_ply) as i16 + 1;
+            return MIN_SCORE + engine.position().ply() as i16 + 1;
         } else {
             best_score = MIN_SCORE;
         }
@@ -79,7 +73,7 @@ fn quiesce(
         let mut new_quiet_limit = quiet_limit;
 
         // TODO: consider en-passant as capture
-        if generator.checkers() == Bitboard(0) && !engine.position().get(r#move.to()).is_some() {
+        if !engine.position().get(r#move.to()).is_some() {
             new_quiet_limit = new_quiet_limit.saturating_sub(1);
         }
 
@@ -136,7 +130,7 @@ fn alpha_beta(
     root: bool,
 ) -> Option<i16> {
     if depth == 0 {
-        return Some(quiesce(engine, stats, alpha, beta, 1));
+        return Some(quiesce(engine, stats, alpha, beta, 0));
     } else if depth >= 4 && Instant::now() >= end {
         return None;
     }
@@ -155,7 +149,7 @@ fn alpha_beta(
 
     if pick.is_empty() {
         if generator.checkers() != Bitboard(0) {
-            return Some(MIN_SCORE + (engine.position().ply() - stats.root_ply) as i16 + 1);
+            return Some(MIN_SCORE + engine.position().ply() as i16 + 1);
         } else {
             return Some(0);
         }
@@ -282,9 +276,10 @@ pub fn search(engine: &mut Engine, end: Instant) -> Move {
     let mut min_score = MIN_SCORE;
     let mut max_score = MAX_SCORE;
 
+    let root_ply = engine.position().ply();
+
     for depth in 1.. {
         let mut stats = Stats {
-            root_ply: engine.position().ply(),
             best_index_distribution: Vec::new(),
         };
 
@@ -320,9 +315,9 @@ pub fn search(engine: &mut Engine, end: Instant) -> Move {
 
         if score.abs() > MATE_SCORE {
             if score > 0 {
-                print!("mate {}", (MAX_SCORE - score) / 2);
+                print!("mate {}", (MAX_SCORE - score - root_ply as i16 + 1) / 2);
             } else {
-                print!("mate {}", (MIN_SCORE - score) / 2);
+                print!("mate {}", (MIN_SCORE - score + root_ply as i16) / 2);
             }
         } else {
             print!("cp {score}");
