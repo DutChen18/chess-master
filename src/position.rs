@@ -484,24 +484,26 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
+        let global = GlobalData::get();
+
         let mut score = 0;
 
         score += self.state().square_score * self.turn().sign();
-        score += (self.evaluate_side::<ConstWhite>() - self.evaluate_side::<ConstBlack>())
+        score += (self.evaluate_side::<ConstWhite>(global) - self.evaluate_side::<ConstBlack>(global))
             * self.turn().sign();
 
         score
     }
 
-    pub fn evaluate_side<C: ConstColor>(&self) -> i16 {
+    pub fn evaluate_side<C: ConstColor>(&self, global: &GlobalData) -> i16 {
         let mut score: i16 = 0;
 
         score += *C::color().index(&self.state().material);
         score += self.pawn_structure::<C>();
         // score += self.king_safety::<C>();
         // score += self.intruders::<C>();
-        score += self.slider_mobility::<C>();
-        // score += self.pinned_pieces::<C>();
+        score += self.slider_mobility::<C>(global);
+        // score += self.pinned_pieces::<C>(global);
         // score += self.defended::<C>();
 
         score
@@ -585,41 +587,40 @@ impl Position {
         (pieces & ranks).count() as i16 * INTRUDER
     }
 
-    pub fn slider_mobility<C: ConstColor>(&self) -> i16 {
+    pub fn slider_mobility<C: ConstColor>(&self, global: &GlobalData) -> i16 {
         const BISHOP_MOBILITY: i16 = 2;
         const ROOK_MOBILITY: i16 = 3;
-        // const BISHOP_BATTERY: i16 = 10;
-        // const ROOK_BATTERY: i16 = 10;
+        const BISHOP_BATTERY: i16 = 5;
+        const ROOK_BATTERY: i16 = 10;
 
         let mut score = 0;
 
-        let magic = GlobalData::get().magic();
+        let magic = global.magic();
 
         let bishops = self.bishop_queen_bb(C::color());
-        let rooks = self.bishop_queen_bb(C::color());
+        let rooks = self.rook_queen_bb(C::color());
         let occupied = self.occupied_bb();
 
         for square in bishops {
             let bb = magic.bishop(square, occupied);
 
             score += bb.count() as i16 * BISHOP_MOBILITY;
-            // score += (bb & bishops).count() as i16 * BISHOP_BATTERY;
+            score += (bb & bishops).count() as i16 * BISHOP_BATTERY;
         }
 
         for square in rooks {
             let bb = magic.rook(square, occupied);
 
             score += bb.count() as i16 * ROOK_MOBILITY;
-            // score += (bb & rooks).count() as i16 * ROOK_BATTERY;
+            score += (bb & rooks).count() as i16 * ROOK_BATTERY;
         }
 
         score
     }
 
-    pub fn pinned_pieces<C: ConstColor>(&self) -> i16 {
+    pub fn pinned_pieces<C: ConstColor>(&self, global: &GlobalData) -> i16 {
         const PINNED: i16 = -20;
 
-        let global = GlobalData::get();
         let magic = global.magic();
         let attack = global.attack();
 
@@ -655,7 +656,7 @@ impl Position {
         for piece in defended {
             score += self.get(piece).unwrap().kind().value() / 5;
         }
-        
+
         score
     }
 

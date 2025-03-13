@@ -1,5 +1,4 @@
 use engine::Engine;
-use position::Position;
 
 pub mod attack;
 pub mod bitboard;
@@ -23,10 +22,6 @@ pub mod zobrist;
 
 fn main() {
     let mut engine = Engine::new();
-
-    let position = Position::from_str("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
-
-    eprintln!("{}", position.evaluate());
 
     engine.run();
 }

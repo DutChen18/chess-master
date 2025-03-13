@@ -43,7 +43,7 @@ fn quiesce(
         Pick::new::<false, false>(engine, &generator, killer)
     };
 
-    let mut best_score = if let Some(entry) = pick.entry() {
+    if let Some(entry) = pick.entry() {
         // TT cut
         if match entry.bound() {
             Bound::Exact => true,
@@ -52,11 +52,9 @@ fn quiesce(
         } {
             return entry.score();
         }
-
-        entry.score()
-    } else {
-        engine.position().evaluate()
     };
+
+    let mut best_score = engine.position().evaluate();
 
     if in_check {
         if pick.is_empty() {
@@ -340,9 +338,11 @@ pub fn search(engine: &mut Engine, end: Instant, limits: &SearchLimits) -> Move 
 
         get_pv(engine, &mut pv, &mut visited);
 
+        const WINDOW: i16 = 50;
+
         best_move = pv[0];
-        min_score = i16::max(score, MIN_SCORE + 50) - 50;
-        max_score = i16::min(score, MAX_SCORE - 50) + 50;
+        min_score = i16::max(score, MIN_SCORE + WINDOW) - WINDOW;
+        max_score = i16::min(score, MAX_SCORE - WINDOW) + WINDOW;
 
         print!("info depth {depth} time {ms} score ");
 
