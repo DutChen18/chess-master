@@ -48,6 +48,10 @@ impl SearchLimits {
         limits
     }
 
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
     pub fn get_end_time(&self, color: Color) -> Instant {
         if self.movetime != Duration::default() {
             return Instant::now() + self.movetime.mul_f32(0.9);

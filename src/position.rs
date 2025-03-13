@@ -38,7 +38,7 @@ impl Position {
     pub fn new() -> Self {
         Self::from_str(Self::STARTPOS)
     }
-    
+
     pub fn from_str(fen: &str) -> Self {
         Self::parse(&fen.split(" ").collect::<Vec<_>>())
     }
@@ -164,6 +164,22 @@ impl Position {
 
     pub fn king_square(&self, color: Color) -> Square {
         self.color_kind_bb(color, Kind::King).square().unwrap()
+    }
+
+    pub fn captured_piece(&self, r#move: Move) -> Option<(Piece, Square)> {
+        if let Some(piece) = self.get(r#move.to()) {
+            Some((piece, r#move.to()))
+        } else {
+            let from_piece = self.get(r#move.from()).unwrap();
+
+            if from_piece.kind() == Kind::Pawn && self.en_passant() == Some(r#move.to()) {
+                let square = Square::new(r#move.to().file(), r#move.from().rank());
+
+                Some((self.get(square).unwrap(), square))
+            } else {
+                None
+            }
+        }
     }
 
     pub fn state(&self) -> &State {
@@ -468,43 +484,61 @@ impl Position {
 
     // Relative to side
     pub fn evaluate(&self) -> i16 {
-        (self.state().square_score + self.evaluate_side::<ConstWhite>()
-            - self.evaluate_side::<ConstBlack>())
-            * self.turn().sign()
+        let mut score = 0;
+
+        score += self.state().square_score * self.turn().sign();
+        score += (self.evaluate_side::<ConstWhite>() - self.evaluate_side::<ConstBlack>())
+            * self.turn().sign();
+
+        score
     }
 
     pub fn evaluate_side<C: ConstColor>(&self) -> i16 {
         let mut score: i16 = 0;
 
-        score += C::color().index(&self.state().material);
-        score += self.evaluate_pawn_structure::<C>();
-        //score += self.king_safety::<C>();
-        //score += self.pawn_adjustment::<C>();
+        score += *C::color().index(&self.state().material);
+        score += self.pawn_structure::<C>();
+        // score += self.king_safety::<C>();
+        // score += self.intruders::<C>();
+        score += self.slider_mobility::<C>();
+        // score += self.pinned_pieces::<C>();
+        // score += self.defended::<C>();
 
         score
     }
 
-    pub fn evaluate_pawn_structure<C: ConstColor>(&self) -> i16 {
+    pub fn pawn_structure<C: ConstColor>(&self) -> i16 {
         const PROTECTED: i16 = 10;
-        const ISOLATED: i16 = -25;
-        const DOUBLED: i16 = -25;
+        const DOUBLED: i16 = -20;
+        //const ISOLATED: i16 = -20;
+        const PASSED: i16 = 20;
 
         let mut score = 0;
 
-        let bb = self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
 
-        // Reward pawns protecting each other
-        score += (bb & shift::pawn_attack::<C>(bb)).count() as i16 * PROTECTED;
+        // Pawns chains
+        score += (pawns & shift::pawn_attack::<C>(pawns)).count() as i16 * PROTECTED;
 
-        // Punish double pawns
-        score += (bb & C::up().shift(bb)).count() as i16 * DOUBLED;
+        // Double pawns
+        score += (pawns & C::up().shift(pawns)).count() as i16 * DOUBLED;
 
-        // Punish isolated pawns
-        let lines = shift::ray(shift::So, shift::ray(shift::No, bb, !Bitboard(0)), !Bitboard(0));
-        let nb = Offset::<-1, 0>.shift(lines) | Offset::<1, 0>.shift(lines);
-        let one = Into::<Bitboard>::into(Rank::_1) & (!nb & lines);
+        // Isolated pawns
+        // Disabled because of bad results
+        // score += shift::squash(pawns).count() as i16 * ISOLATED;
 
-        score += one.count() as i16 * ISOLATED;
+        let mut bb = self.board.color_kind_bb(!C::color(), Kind::Pawn);
+
+        for _ in 0..6 {
+            bb |= C::Opponent::up_left().shift(bb)
+                | C::Opponent::up().shift(bb)
+                | C::Opponent::up_right().shift(bb);
+        }
+
+        // Passed pawns
+        for pawn in pawns & !bb {
+            score += pawn.rank().r#for(C::color()) as i16 * PASSED;
+        }
 
         score
     }
@@ -537,27 +571,94 @@ impl Position {
         score
     }
 
-    pub fn pawn_adjustment<C: ConstColor>(&self) -> i16 {
-        // CP adjustment per pawn present
-        const KNIGHT: i16 = 5;
-        const ROOK: i16 = -5;
-        const QUEEN: i16 = -10;
+    pub fn intruders<C: ConstColor>(&self) -> i16 {
+        const INTRUDER: i16 = 10;
+
+        let pieces = self.board.color_bb(C::color());
+        let mut ranks = Bitboard::FULL;
+
+        ranks = C::up().shift(ranks);
+        ranks = C::up().shift(ranks);
+        ranks = C::up().shift(ranks);
+        ranks = C::up().shift(ranks);
+
+        (pieces & ranks).count() as i16 * INTRUDER
+    }
+
+    pub fn slider_mobility<C: ConstColor>(&self) -> i16 {
+        const BISHOP_MOBILITY: i16 = 2;
+        const ROOK_MOBILITY: i16 = 3;
+        // const BISHOP_BATTERY: i16 = 10;
+        // const ROOK_BATTERY: i16 = 10;
 
         let mut score = 0;
 
-        let pawns = self.board.kind_bb(Kind::Pawn);
-        let knights = self.board.color_kind_bb(C::color(), Kind::Knight);
-        let rooks = self.board.color_kind_bb(C::color(), Kind::Rook);
-        let queen = self.board.color_kind_bb(C::color(), Kind::Queen);
+        let magic = GlobalData::get().magic();
 
-        score += pawns.count() as i16 * knights.count() as i16 * KNIGHT;
-        score += pawns.count() as i16 * rooks.count() as i16 * ROOK;
-        score += pawns.count() as i16 * queen.count() as i16 * QUEEN;
+        let bishops = self.bishop_queen_bb(C::color());
+        let rooks = self.bishop_queen_bb(C::color());
+        let occupied = self.occupied_bb();
+
+        for square in bishops {
+            let bb = magic.bishop(square, occupied);
+
+            score += bb.count() as i16 * BISHOP_MOBILITY;
+            // score += (bb & bishops).count() as i16 * BISHOP_BATTERY;
+        }
+
+        for square in rooks {
+            let bb = magic.rook(square, occupied);
+
+            score += bb.count() as i16 * ROOK_MOBILITY;
+            // score += (bb & rooks).count() as i16 * ROOK_BATTERY;
+        }
 
         score
     }
 
-    // Used only in parse
+    pub fn pinned_pieces<C: ConstColor>(&self) -> i16 {
+        const PINNED: i16 = -20;
+
+        let global = GlobalData::get();
+        let magic = global.magic();
+        let attack = global.attack();
+
+        let own_king = self.king_square(C::color());
+        let own = self.color_bb(C::color());
+        let occupied = self.occupied_bb();
+
+        let opp_bishop = self.bishop_queen_bb(C::opponent());
+        let opp_rook = self.rook_queen_bb(C::opponent());
+
+        let mut pinners = Bitboard(0);
+        let mut pinned = Bitboard(0);
+
+        let bb = magic.bishop(own_king, occupied);
+        pinners |= (magic.bishop(own_king, occupied ^ (bb & own)) ^ bb) & opp_bishop;
+        let bb = magic.rook(own_king, occupied);
+        pinners |= (magic.rook(own_king, occupied ^ (bb & own)) ^ bb) & opp_rook;
+
+        for pinner in pinners {
+            pinned |= attack.between(own_king, pinner) & own;
+        }
+
+        pinned.count() as i16 * PINNED
+    }
+
+    pub fn defended<C: ConstColor>(&self) -> i16 {
+        let pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let pieces = !pawns & self.board.color_bb(C::color());
+        let defended = pawns & pieces;
+
+        let mut score = 0;
+
+        for piece in defended {
+            score += self.get(piece).unwrap().kind().value() / 5;
+        }
+        
+        score
+    }
+
     pub fn square_scores(&self) -> i16 {
         let phase = self.phase();
         let data = GlobalData::get();

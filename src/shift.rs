@@ -100,6 +100,14 @@ pub fn ray(ray: impl Ray, mut gen: Bitboard, mut pro: Bitboard) -> Bitboard {
     ray.one().shift(gen)
 }
 
+pub fn squash(mut bb: Bitboard) -> Bitboard {
+    bb = (Bitboard(0xFFFFFFFF00000000) & bb) >> 32 | (Bitboard(0x00000000FFFFFFFF)& bb);
+    bb = (Bitboard(0xFFFF0000) & bb) >> 16 | (Bitboard(0x0000FFFF) & bb);
+    bb = (Bitboard(0xFF00) & bb) >> 8 | (Bitboard(0x00FF) & bb);
+
+    bb
+}
+
 pub fn pawn_attack<C: ConstColor>(bb: Bitboard) -> Bitboard {
     if C::color() == Color::White {
         Offset::<1, 1>.shift(bb) | Offset::<-1, 1>.shift(bb)

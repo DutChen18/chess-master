@@ -23,9 +23,10 @@ pub mod zobrist;
 
 fn main() {
     let mut engine = Engine::new();
-    let position = Position::new();
 
-    position.evaluate();
+    let position = Position::from_str("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+
+    eprintln!("{}", position.evaluate());
 
     engine.run();
 }

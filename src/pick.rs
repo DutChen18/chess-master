@@ -22,6 +22,7 @@ pub struct MoveEntry {
 pub struct Pick {
     moves: [MaybeUninit<MoveEntry>; MAX_MOVES],
     entry: Option<Entry>,
+    killer: Option<Move>,
     attacked: Bitboard,
     capture_end: usize,
     quiet_start: usize,
@@ -32,7 +33,8 @@ struct PickList<'a> {
     pick: &'a mut Pick,
     tt_move: Move,
     tt_hit: bool,
-    board: &'a Board,
+    killer_hit: bool,
+    position: &'a Position,
 }
 
 impl MoveList for PickList<'_> {
@@ -43,8 +45,13 @@ impl MoveList for PickList<'_> {
             return;
         }
 
-        // TODO: consider en-passant as capture
-        if self.board.get(r#move.to()).is_some() {
+        if Some(r#move) == self.pick.killer {
+            self.killer_hit = true;
+
+            return;
+        }
+
+        if self.position.captured_piece(r#move).is_some() {
             self.pick.moves[self.pick.capture_end].write(MoveEntry { r#move, score: 0 });
             self.pick.capture_end += 1;
         } else {
@@ -58,6 +65,7 @@ impl Pick {
     pub fn new<const QUIET: bool, const CHECKS: bool>(
         engine: &Engine,
         generator: &Generator,
+        killer: Option<Move>,
     ) -> Self {
         let hash = engine.position().hash();
         let entry = engine.tt().probe(hash);
@@ -66,6 +74,7 @@ impl Pick {
         let mut pick = Pick {
             moves: [const { MaybeUninit::uninit() }; MAX_MOVES],
             entry,
+            killer,
             attacked: generator.attacked(),
             index: 0,
             capture_end: 0,
@@ -76,13 +85,18 @@ impl Pick {
             pick: &mut pick,
             tt_move,
             tt_hit: false,
-            board: engine.position(),
+            killer_hit: false,
+            position: engine.position(),
         };
 
         generator.generate_dyn::<QUIET, CHECKS>(&mut pick_list, engine.position());
 
         if !pick_list.tt_hit {
-            pick.entry = None;
+            pick_list.pick.entry = None;
+        }
+
+        if !pick_list.killer_hit {
+            pick_list.pick.killer = None;
         }
 
         pick
@@ -109,6 +123,14 @@ impl Pick {
             }
 
             index -= 1
+        }
+
+        if let Some(killer) = self.killer {
+            if index == 0 {
+                return Some(killer);
+            }
+
+            index -= 1;
         }
 
         let attacked = self.attacked;
@@ -212,28 +234,32 @@ fn lva<C: ConstColor>(
 
 fn see<C: ConstColor, const CAPTURE: bool>(
     global: &GlobalData,
-    board: &Board,
+    position: &Position,
     kind: Kind,
     r#move: Move,
 ) -> i16 {
-    let mut occupied = board.occupied_bb() ^ Bitboard::from(r#move.from());
+    let mut occupied = position.occupied_bb() ^ Bitboard::from(r#move.from());
     let mut stack = [0; 32];
     let mut depth = 0;
     let mut value = kind.value();
     let mut accum = 0;
 
     if CAPTURE {
-        accum = board.get(r#move.to()).unwrap().kind().value();
+        let (capture, square) = position.captured_piece(r#move).unwrap();
+
+        accum = capture.kind().value();
+        occupied &= !Bitboard::from(square);
     }
 
-    while let Some((new_value, bb)) = lva::<C>(global, board, r#move.to(), occupied) {
+    while let Some((new_value, bb)) = lva::<C>(global, position, r#move.to(), occupied) {
         occupied ^= bb & -bb;
         stack[depth] = accum;
         depth += 1;
         accum = value - accum;
         value = new_value;
 
-        let Some((new_value, bb)) = lva::<C::Opponent>(global, board, r#move.to(), occupied) else {
+        let Some((new_value, bb)) = lva::<C::Opponent>(global, position, r#move.to(), occupied)
+        else {
             break;
         };
 
@@ -253,13 +279,13 @@ fn see<C: ConstColor, const CAPTURE: bool>(
 
 fn see_dyn<const CAPTURE: bool>(
     global: &GlobalData,
-    board: &Board,
+    position: &Position,
     piece: Piece,
     r#move: Move,
 ) -> i16 {
     match piece.color() {
-        Color::White => see::<ConstWhite, CAPTURE>(global, board, piece.kind(), r#move),
-        Color::Black => see::<ConstBlack, CAPTURE>(global, board, piece.kind(), r#move),
+        Color::White => see::<ConstWhite, CAPTURE>(global, position, piece.kind(), r#move),
+        Color::Black => see::<ConstBlack, CAPTURE>(global, position, piece.kind(), r#move),
     }
 }
 
@@ -273,19 +299,32 @@ fn sort_moves<const CAPTURE: bool>(
     let phase = position.phase();
 
     for entry in &mut *moves {
-        let piece = position.get(entry.r#move.from()).unwrap();
+        let old_piece = position.get(entry.r#move.from()).unwrap();
         let bb = Bitboard::from(entry.r#move.from()) | Bitboard::from(entry.r#move.to());
 
+        let new_piece = entry
+            .r#move
+            .kind()
+            .map(|kind| Piece::new(old_piece.color(), kind))
+            .unwrap_or(old_piece);
+
         let see_score = if bb & attacked != Bitboard(0) {
-            see_dyn::<CAPTURE>(global, position, piece, entry.r#move)
+            see_dyn::<CAPTURE>(global, position, new_piece, entry.r#move)
         } else if CAPTURE {
-            position.get(entry.r#move.to()).unwrap().kind().value()
+            position
+                .captured_piece(entry.r#move)
+                .unwrap()
+                .0
+                .kind()
+                .value()
         } else {
             0
         };
 
-        entry.score = see_score + piece_square.get(piece, entry.r#move.to(), phase)
-            - piece_square.get(piece, entry.r#move.from(), phase);
+        entry.score = see_score + piece_square.get(old_piece, entry.r#move.to(), phase)
+            - piece_square.get(old_piece, entry.r#move.from(), phase)
+            + new_piece.kind().value()
+            - old_piece.kind().value();
     }
 
     moves.sort_unstable_by_key(|entry| -entry.score);

@@ -498,6 +498,13 @@ impl fmt::Display for Square {
     }
 }
 
+impl fmt::Display for Color {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self { Self::White => "white", Self::Black => "black" })
+    }
+}
+
+
 impl fmt::Display for CastlingRights {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.has(Self::WHITE_SHORT) {

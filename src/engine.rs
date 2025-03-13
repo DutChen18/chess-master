@@ -148,7 +148,7 @@ impl Engine {
 
         println!(
             "bestmove {}",
-            search::search(self, limits.get_end_time(self.position.turn()))
+            search::search(self, limits.get_end_time(self.position.turn()), &limits)
         );
 
         self.age += 1;

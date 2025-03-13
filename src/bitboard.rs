@@ -12,6 +12,9 @@ use std::mem;
 pub struct Bitboard(pub u64);
 
 impl Bitboard {
+    pub const EMPTY: Bitboard = Bitboard(0);
+    pub const FULL: Bitboard = Bitboard(u64::MAX);
+
     pub fn square(self) -> Option<Square> {
         match self.0.trailing_zeros() {
             square @ 0..64 => Some(unsafe { mem::transmute(square as u8) }),

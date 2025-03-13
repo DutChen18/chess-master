@@ -6,6 +6,7 @@ use crate::{
     gen::{self, Generator, MoveVec},
     pick::Pick,
     r#move::Move,
+    searchlimits::SearchLimits,
     tt::{Bound, Entry},
 };
 
@@ -15,6 +16,8 @@ const MATE_SCORE: i16 = MAX_SCORE / 2;
 
 struct Stats {
     best_index_distribution: Vec<usize>,
+    killer_moves: Vec<(Move, i16)>,
+    root_ply: u32,
 }
 
 fn quiesce(
@@ -28,13 +31,16 @@ fn quiesce(
     let mut best_index = None;
     let mut bound = Bound::Upper;
     let generator = Generator::new_dyn(engine.position());
+    let ply_index = (engine.position().ply() - stats.root_ply) as usize;
+    let killer = stats.killer_moves.get(ply_index).map(|(r#move, _)| *r#move);
+    let in_check = generator.checkers() != Bitboard(0);
 
-    let mut pick = if generator.checkers() != Bitboard(0) {
-        Pick::new::<true, true>(engine, &generator)
+    let mut pick = if in_check {
+        Pick::new::<true, true>(engine, &generator, killer)
     } else if quiet_limit > 0 {
-        Pick::new::<false, true>(engine, &generator)
+        Pick::new::<false, true>(engine, &generator, killer)
     } else {
-        Pick::new::<false, false>(engine, &generator)
+        Pick::new::<false, false>(engine, &generator, killer)
     };
 
     let mut best_score = if let Some(entry) = pick.entry() {
@@ -52,7 +58,7 @@ fn quiesce(
         engine.position().evaluate()
     };
 
-    if generator.checkers() != Bitboard(0) {
+    if in_check {
         if pick.is_empty() {
             return MIN_SCORE + engine.position().ply() as i16 + 1;
         } else {
@@ -72,8 +78,7 @@ fn quiesce(
     while let Some((i, r#move)) = pick.next(engine.position()) {
         let mut new_quiet_limit = quiet_limit;
 
-        // TODO: consider en-passant as capture
-        if !engine.position().get(r#move.to()).is_some() {
+        if engine.position().captured_piece(r#move).is_none() {
             new_quiet_limit = new_quiet_limit.saturating_sub(1);
         }
 
@@ -117,6 +122,15 @@ fn quiesce(
         stats.best_index_distribution[best_index] += 1;
     }
 
+    // Update killer move
+    stats
+        .killer_moves
+        .resize(ply_index + 1, (Move::null(), MIN_SCORE));
+
+    if best_score > stats.killer_moves[ply_index].1 {
+        stats.killer_moves[ply_index] = (best_move, best_score);
+    }
+
     return best_score;
 }
 
@@ -140,7 +154,13 @@ fn alpha_beta(
     let mut best_index = None;
     let mut bound = Bound::Upper;
     let generator = Generator::new_dyn(engine.position());
-    let mut pick = Pick::new::<true, true>(engine, &generator);
+    let ply_index = (engine.position().ply() - stats.root_ply) as usize;
+
+    let mut pick = Pick::new::<true, true>(
+        engine,
+        &generator,
+        stats.killer_moves.get(ply_index).map(|(r#move, _)| *r#move),
+    );
 
     // Checkmate or draw
     if !root && engine.position().is_technical_draw() {
@@ -227,13 +247,22 @@ fn alpha_beta(
         .tt_mut()
         .insert(Entry::new(hash, age, best_move, depth, best_score, bound));
 
-    // Updaet stats
+    // Update stats
     if let Some(best_index) = best_index {
         if best_index >= stats.best_index_distribution.len() {
             stats.best_index_distribution.resize(best_index + 1, 0);
         }
 
         stats.best_index_distribution[best_index] += 1;
+    }
+
+    // Update killer move
+    stats
+        .killer_moves
+        .resize(ply_index + 1, (Move::null(), MIN_SCORE));
+
+    if best_score > stats.killer_moves[ply_index].1 {
+        stats.killer_moves[ply_index] = (best_move, best_score);
     }
 
     Some(best_score)
@@ -264,7 +293,7 @@ fn get_pv(engine: &mut Engine, pv: &mut Vec<Move>, visited: &mut HashSet<u64>) {
     }
 }
 
-pub fn search(engine: &mut Engine, end: Instant) -> Move {
+pub fn search(engine: &mut Engine, end: Instant, limits: &SearchLimits) -> Move {
     if engine.options.ownbook {
         if let Some(r#move) = engine.book().next(engine.position()) {
             return r#move;
@@ -278,10 +307,14 @@ pub fn search(engine: &mut Engine, end: Instant) -> Move {
 
     let root_ply = engine.position().ply();
 
-    for depth in 1.. {
-        let mut stats = Stats {
-            best_index_distribution: Vec::new(),
-        };
+    let mut stats = Stats {
+        best_index_distribution: Vec::new(),
+        killer_moves: Vec::new(),
+        root_ply,
+    };
+
+    for depth in 1..=limits.depth() as u16 {
+        stats.best_index_distribution.clear();
 
         let mut score;
 
