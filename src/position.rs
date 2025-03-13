@@ -1,10 +1,5 @@
 use crate::{
-    bitboard::Bitboard,
-    board::Board,
-    global::GlobalData,
-    r#move::Move,
-    shift::{self, Offset, Shift},
-    types::*,
+    bitboard::Bitboard, board::Board, global::GlobalData, r#move::Move, shift::{self, Shift}, types::*
 };
 
 use std::ops::Deref;
@@ -17,7 +12,6 @@ pub struct State {
     halfmove_clock: u32,
 
     material: [i16; Color::COUNT],
-    square_score: i16,
 }
 
 pub struct UndoState {
@@ -96,17 +90,14 @@ impl Position {
             castling_rights,
             en_passant,
             halfmove_clock,
-            square_score: 0,
             material,
         };
 
-        let mut position = Self {
+        let position = Self {
             board,
             ply,
             states: vec![state],
         };
-
-        position.states.last_mut().unwrap().square_score = position.square_scores();
 
         position
     }
@@ -251,20 +242,16 @@ impl Position {
     pub fn make(&mut self, r#move: Move) -> UndoState {
         let data = GlobalData::get();
         let zobrist = data.zobrist();
-        let table = data.square();
 
         let mut state = self.state().clone();
         let piece = self.board.get(r#move.from()).unwrap();
         let mut capture = self.board.get(r#move.to());
-        let mut phase = self.phase();
 
         self.board.set(r#move.from(), None);
         self.board.set(r#move.to(), Some(piece));
 
         state.hash ^= zobrist.piece(piece, r#move.from());
         state.hash ^= zobrist.piece(piece, r#move.to());
-
-        state.square_score -= table.get(piece, r#move.from(), phase) * piece.color().sign();
 
         // Capture
         if let Some(captured) = capture {
@@ -286,10 +273,6 @@ impl Position {
             *piece.color().index_mut(&mut state.material) += promotion.value();
         }
 
-        phase = self.phase();
-
-        state.square_score += table.get(piece, r#move.to(), phase) * piece.color().sign();
-
         // Move rook when castling
         if piece.kind() == Kind::King {
             let rook = Piece::new(piece.color(), Kind::Rook);
@@ -304,11 +287,6 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::H1);
                         state.hash ^= zobrist.piece(rook, Square::F1);
-
-                        state.square_score -=
-                            table.get(rook, Square::H1, phase) * rook.color().sign();
-                        state.square_score +=
-                            table.get(rook, Square::F1, phase) * rook.color().sign();
                     }
 
                     if state.castling_rights.has(CastlingRights::WHITE_LONG)
@@ -319,11 +297,6 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::A1);
                         state.hash ^= zobrist.piece(rook, Square::D1);
-
-                        state.square_score -=
-                            table.get(rook, Square::A1, phase) * rook.color().sign();
-                        state.square_score +=
-                            table.get(rook, Square::D1, phase) * rook.color().sign();
                     }
                 }
                 Color::Black => {
@@ -335,11 +308,6 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::H8);
                         state.hash ^= zobrist.piece(rook, Square::F8);
-
-                        state.square_score -=
-                            table.get(rook, Square::H8, phase) * rook.color().sign();
-                        state.square_score +=
-                            table.get(rook, Square::F8, phase) * rook.color().sign();
                     }
 
                     if state.castling_rights.has(CastlingRights::BLACK_LONG)
@@ -350,11 +318,6 @@ impl Position {
 
                         state.hash ^= zobrist.piece(rook, Square::A8);
                         state.hash ^= zobrist.piece(rook, Square::D8);
-
-                        state.square_score -=
-                            table.get(rook, Square::A8, phase) * rook.color().sign();
-                        state.square_score +=
-                            table.get(rook, Square::D8, phase) * rook.color().sign();
                     }
                 }
             }
@@ -370,10 +333,8 @@ impl Position {
             capture = Some(Piece::new(!self.turn(), Kind::Pawn));
 
             state.hash ^= zobrist.piece(captured, taken);
-
-            state.square_score -= table.get(captured, taken, phase) * captured.color().sign();
         }
-
+        
         if let Some(ep) = state.en_passant {
             state.hash ^= zobrist.en_passant(ep.file());
         }
@@ -488,7 +449,7 @@ impl Position {
 
         let mut score = 0;
 
-        score += self.state().square_score * self.turn().sign();
+        score += self.evaluate_piece_square_table() * self.turn().sign();
         score += (self.evaluate_side::<ConstWhite>(global) - self.evaluate_side::<ConstBlack>(global))
             * self.turn().sign();
 
@@ -500,11 +461,18 @@ impl Position {
 
         score += *C::color().index(&self.state().material);
         score += self.pawn_structure::<C>();
-        // score += self.king_safety::<C>();
-        // score += self.intruders::<C>();
         score += self.slider_mobility::<C>(global);
-        // score += self.pinned_pieces::<C>(global);
-        // score += self.defended::<C>();
+        score += self.bishop_pair::<C>();
+
+        match self.phase() {
+            Phase::Opening => (),
+            Phase::Middle => (),
+            Phase::Endgame => {
+                if self.is_kingpawn_endgame() {
+                     score += self.rule_of_the_square::<C>();
+                }
+            }
+        }
 
         score
     }
@@ -545,48 +513,6 @@ impl Position {
         score
     }
 
-    pub fn king_safety<C: ConstColor>(&self) -> i16 {
-        const SHIELD: i16 = 20;
-        const STORM: i16 = -10;
-
-        let mut score = 0;
-
-        let sides = !(Into::<Bitboard>::into(File::D) | Into::<Bitboard>::into(File::E));
-        let king = self.board.color_kind_bb(C::color(), Kind::King);
-        let mut pawns = sides & self.board.color_kind_bb(C::color(), Kind::Pawn);
-        let mut bb = king & sides;
-
-        // Pawn shield
-        bb |= Offset::<-1, 0>.shift(bb) | Offset::<1, 0>.shift(bb);
-        bb |= C::up().shift(bb);
-        bb |= C::up().shift(bb);
-
-        score += (bb & pawns).count() as i16 * SHIELD;
-
-        // Pawn storm
-        pawns = sides & self.board.color_kind_bb(!C::color(), Kind::Pawn);
-        bb |= C::up().shift(bb);
-        bb |= C::up().shift(bb);
-
-        score += (bb & pawns).count() as i16 * STORM;
-
-        score
-    }
-
-    pub fn intruders<C: ConstColor>(&self) -> i16 {
-        const INTRUDER: i16 = 10;
-
-        let pieces = self.board.color_bb(C::color());
-        let mut ranks = Bitboard::FULL;
-
-        ranks = C::up().shift(ranks);
-        ranks = C::up().shift(ranks);
-        ranks = C::up().shift(ranks);
-        ranks = C::up().shift(ranks);
-
-        (pieces & ranks).count() as i16 * INTRUDER
-    }
-
     pub fn slider_mobility<C: ConstColor>(&self, global: &GlobalData) -> i16 {
         const BISHOP_MOBILITY: i16 = 2;
         const ROOK_MOBILITY: i16 = 3;
@@ -618,52 +544,9 @@ impl Position {
         score
     }
 
-    pub fn pinned_pieces<C: ConstColor>(&self, global: &GlobalData) -> i16 {
-        const PINNED: i16 = -20;
-
-        let magic = global.magic();
-        let attack = global.attack();
-
-        let own_king = self.king_square(C::color());
-        let own = self.color_bb(C::color());
-        let occupied = self.occupied_bb();
-
-        let opp_bishop = self.bishop_queen_bb(C::opponent());
-        let opp_rook = self.rook_queen_bb(C::opponent());
-
-        let mut pinners = Bitboard(0);
-        let mut pinned = Bitboard(0);
-
-        let bb = magic.bishop(own_king, occupied);
-        pinners |= (magic.bishop(own_king, occupied ^ (bb & own)) ^ bb) & opp_bishop;
-        let bb = magic.rook(own_king, occupied);
-        pinners |= (magic.rook(own_king, occupied ^ (bb & own)) ^ bb) & opp_rook;
-
-        for pinner in pinners {
-            pinned |= attack.between(own_king, pinner) & own;
-        }
-
-        pinned.count() as i16 * PINNED
-    }
-
-    pub fn defended<C: ConstColor>(&self) -> i16 {
-        let pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
-        let pieces = !pawns & self.board.color_bb(C::color());
-        let defended = pawns & pieces;
-
-        let mut score = 0;
-
-        for piece in defended {
-            score += self.get(piece).unwrap().kind().value() / 5;
-        }
-
-        score
-    }
-
-    pub fn square_scores(&self) -> i16 {
+    pub fn evaluate_piece_square_table(&self) -> i16 {
         let phase = self.phase();
-        let data = GlobalData::get();
-        let table = data.square();
+        let table = GlobalData::get().square();
         let mut score = 0;
 
         for piece in Piece::iter() {
@@ -677,13 +560,47 @@ impl Position {
         score
     }
 
+    pub fn rule_of_the_square<C: ConstColor>(&self) -> i16 {
+        const RULEOFTHESQUARE: i16 = 20;
+
+        let mut score = 0;
+
+        let mut pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let mut king = self.board.color_kind_bb(!C::color(), Kind::King);
+        let top = Rank::_8.r#for(C::color()).into();
+
+        for _ in 0..5 {
+            pawns = C::up().shift(pawns);
+            king |= shift::king_attack(king);
+
+            if pawns & top & !king != Bitboard::EMPTY {
+                score += RULEOFTHESQUARE;
+                pawns &= !top;
+            }
+        }
+
+        score
+    }
+
+    pub fn bishop_pair<C: ConstColor>(&self) -> i16 {
+        const BISHOPPAIR: i16 = 50;
+
+        let bishops = self.board.color_kind_bb(C::color(), Kind::Bishop);
+
+        if bishops.count() == 2 { BISHOPPAIR } else { 0 }
+    }
+
+    pub fn is_kingpawn_endgame(&self) -> bool {
+        self.board.kind_bb(Kind::King) | self.board.kind_bb(Kind::Pawn) == self.board.occupied_bb()
+    }
+
     pub fn all_material(&self) -> i16 {
         self.state().material.iter().sum::<i16>() - 2 * Kind::King.value()
     }
 
     pub fn phase(&self) -> Phase {
         const MIDGAME: i16 = 3700;
-        const ENDGAME: i16 = 1000;
+        const ENDGAME: i16 = 1500;
 
         match self.all_material() {
             MIDGAME.. => Phase::Opening,

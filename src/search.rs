@@ -143,9 +143,17 @@ fn alpha_beta(
 ) -> Option<i16> {
     if depth == 0 {
         return Some(quiesce(engine, stats, alpha, beta, 0));
+        // return Some(engine.position().evaluate());
     } else if depth >= 4 && Instant::now() >= end {
         return None;
     }
+
+    // let hash = engine.position().hash();
+    // let entry = engine.tt().probe(hash);
+
+    // if entry.is_none() && depth >= 2 {
+    //     alpha_beta(engine, stats, end, alpha, beta, depth - 2, false)?;
+    // }
 
     let mut best_score = MIN_SCORE;
     let mut best_move = Move::null();
@@ -205,15 +213,23 @@ fn alpha_beta(
 
     // Search all children
     while let Some((i, r#move)) = pick.next(engine.position()) {
-        let mut new_depth = depth - 1;
-
-        // Late move reduction
-        if i >= 2 && new_depth >= 2 {
-            new_depth -= 1;
-        }
-
         let undo = engine.position_mut().make(r#move);
-        let score = alpha_beta(engine, stats, end, -beta, -alpha, new_depth, false);
+
+        let score = if i >= 2 && depth >= 2 {
+            if let Some(score) =
+                alpha_beta(engine, stats, end, -(alpha + 1), -alpha, depth - 2, false)
+            {
+                if -score > alpha {
+                    alpha_beta(engine, stats, end, -beta, -alpha, depth - 1, false)
+                } else {
+                    Some(score)
+                }
+            } else {
+                None
+            }
+        } else {
+            alpha_beta(engine, stats, end, -beta, -alpha, depth - 1, false)
+        };
 
         engine.position_mut().unmake(undo);
 
