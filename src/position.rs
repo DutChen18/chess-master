@@ -1,5 +1,5 @@
 use crate::{
-    bitboard::Bitboard, board::Board, global::GlobalData, r#move::Move, shift::{self, Shift}, types::*
+    bitboard::Bitboard, board::Board, global::GlobalData, r#move::Move, shift::{self, Offset, Shift}, types::*
 };
 
 use std::ops::Deref;
@@ -480,7 +480,7 @@ impl Position {
     pub fn pawn_structure<C: ConstColor>(&self) -> i16 {
         const PROTECTED: i16 = 10;
         const DOUBLED: i16 = -20;
-        //const ISOLATED: i16 = -20;
+        const ISOLATED: i16 = -20;
         const PASSED: i16 = 20;
 
         let mut score = 0;
@@ -494,8 +494,10 @@ impl Position {
         score += (pawns & C::up().shift(pawns)).count() as i16 * DOUBLED;
 
         // Isolated pawns
-        // Disabled because of bad results
-        // score += shift::squash(pawns).count() as i16 * ISOLATED;
+        let squashed = shift::squash(pawns);
+        let nb = Offset::<-1, 0>.shift(squashed) | Offset::<1, 0>.shift(squashed);
+
+        score += (!nb & Bitboard(0xFF)).count() as i16 * ISOLATED;
 
         let mut bb = self.board.color_kind_bb(!C::color(), Kind::Pawn);
 
