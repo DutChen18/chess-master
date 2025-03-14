@@ -457,16 +457,6 @@ impl Square {
     }
 }
 
-impl Phase {
-    pub const fn cutoff(&self) -> i16 {
-        match self {
-            Self::Opening => 3700,
-            Self::Middle => 2000,
-            Self::Endgame => 0,
-        }
-    }
-}
-
 impl Not for Color {
     type Output = Self;
 

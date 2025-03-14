@@ -20,13 +20,7 @@ struct Stats {
     root_ply: u32,
 }
 
-fn quiesce(
-    engine: &mut Engine,
-    stats: &mut Stats,
-    mut alpha: i16,
-    beta: i16,
-    quiet_limit: usize,
-) -> i16 {
+fn quiesce(engine: &mut Engine, stats: &mut Stats, mut alpha: i16, beta: i16) -> i16 {
     let mut best_move = Move::null();
     let mut best_index = None;
     let mut bound = Bound::Upper;
@@ -36,11 +30,9 @@ fn quiesce(
     let in_check = generator.checkers() != Bitboard(0);
 
     let mut pick = if in_check {
-        Pick::new::<true, true>(engine, &generator, killer)
-    } else if quiet_limit > 0 {
-        Pick::new::<false, true>(engine, &generator, killer)
+        Pick::new::<true>(engine, &generator, killer)
     } else {
-        Pick::new::<false, false>(engine, &generator, killer)
+        Pick::new::<false>(engine, &generator, killer)
     };
 
     if let Some(entry) = pick.entry() {
@@ -74,14 +66,8 @@ fn quiesce(
 
     // Search all children
     while let Some((i, r#move)) = pick.next(engine.position()) {
-        let mut new_quiet_limit = quiet_limit;
-
-        if engine.position().captured_piece(r#move).is_none() {
-            new_quiet_limit = new_quiet_limit.saturating_sub(1);
-        }
-
         let undo = engine.position_mut().make(r#move);
-        let score = -quiesce(engine, stats, -beta, -alpha, new_quiet_limit);
+        let score = -quiesce(engine, stats, -beta, -alpha);
 
         engine.position_mut().unmake(undo);
 
@@ -142,18 +128,15 @@ fn alpha_beta(
     root: bool,
 ) -> Option<i16> {
     if depth == 0 {
-        return Some(quiesce(engine, stats, alpha, beta, 0));
+        return Some(quiesce(engine, stats, alpha, beta));
         // return Some(engine.position().evaluate());
     } else if depth >= 4 && Instant::now() >= end {
         return None;
     }
 
-    // let hash = engine.position().hash();
-    // let entry = engine.tt().probe(hash);
-
-    // if entry.is_none() && depth >= 2 {
-    //     alpha_beta(engine, stats, end, alpha, beta, depth - 2, false)?;
-    // }
+    if !root && engine.position().is_technical_draw() {
+        return Some(0);
+    }
 
     let mut best_score = MIN_SCORE;
     let mut best_move = Move::null();
@@ -162,17 +145,13 @@ fn alpha_beta(
     let generator = Generator::new_dyn(engine.position());
     let ply_index = (engine.position().ply() - stats.root_ply) as usize;
 
-    let mut pick = Pick::new::<true, true>(
+    let mut pick = Pick::new::<true>(
         engine,
         &generator,
         stats.killer_moves.get(ply_index).map(|(r#move, _)| *r#move),
     );
 
     // Checkmate or draw
-    if !root && engine.position().is_technical_draw() {
-        return Some(0);
-    }
-
     if pick.is_empty() {
         if generator.checkers() != Bitboard(0) {
             return Some(MIN_SCORE + engine.position().ply() as i16 + 1);

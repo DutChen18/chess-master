@@ -5,7 +5,10 @@ pub struct Options {
 
 impl Options {
     pub fn new() -> Self {
-        Self { debug: false, ownbook: false }
+        Self {
+            debug: false,
+            ownbook: true,
+        }
     }
 }
 

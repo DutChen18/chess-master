@@ -62,7 +62,7 @@ impl MoveList for PickList<'_> {
 }
 
 impl Pick {
-    pub fn new<const QUIET: bool, const CHECKS: bool>(
+    pub fn new<const QUIET: bool>(
         engine: &Engine,
         generator: &Generator,
         killer: Option<Move>,
@@ -89,7 +89,7 @@ impl Pick {
             position: engine.position(),
         };
 
-        generator.generate_dyn::<QUIET, CHECKS>(&mut pick_list, engine.position());
+        generator.generate_dyn::<QUIET>(&mut pick_list, engine.position());
 
         if !pick_list.tt_hit {
             pick_list.pick.entry = None;

@@ -60,7 +60,7 @@ impl SearchLimits {
         Instant::now()
             + *color.index(&self.inc)
             + std::cmp::max(
-                Duration::from_millis(100),
+                Duration::from_millis(10),
                 color.index(&self.time).div_f32(50.0),
             )
     }

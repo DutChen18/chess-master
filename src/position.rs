@@ -1,5 +1,10 @@
 use crate::{
-    bitboard::Bitboard, board::Board, global::GlobalData, r#move::Move, shift::{self, Offset, Shift}, types::*
+    bitboard::Bitboard,
+    board::Board,
+    global::GlobalData,
+    r#move::Move,
+    shift::{self, Offset, Shift},
+    types::*,
 };
 
 use std::ops::Deref;
@@ -334,7 +339,7 @@ impl Position {
 
             state.hash ^= zobrist.piece(captured, taken);
         }
-        
+
         if let Some(ep) = state.en_passant {
             state.hash ^= zobrist.en_passant(ep.file());
         }
@@ -449,8 +454,9 @@ impl Position {
 
         let mut score = 0;
 
-        score += self.evaluate_piece_square_table() * self.turn().sign();
-        score += (self.evaluate_side::<ConstWhite>(global) - self.evaluate_side::<ConstBlack>(global))
+        score += self.evaluate_piece_square_table(global) * self.turn().sign();
+        score += (self.evaluate_side::<ConstWhite>(global)
+            - self.evaluate_side::<ConstBlack>(global))
             * self.turn().sign();
 
         score
@@ -469,7 +475,7 @@ impl Position {
             Phase::Middle => (),
             Phase::Endgame => {
                 if self.is_kingpawn_endgame() {
-                     score += self.rule_of_the_square::<C>();
+                    score += self.rule_of_the_square::<C>();
                 }
             }
         }
@@ -486,11 +492,12 @@ impl Position {
         let mut score = 0;
 
         let pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let pieces = self.board.color_bb(C::color()) & !self.board.kind_bb(Kind::King);
 
-        // Pawns chains
-        score += (pawns & shift::pawn_attack::<C>(pawns)).count() as i16 * PROTECTED;
+        // Pieces protected by pawns
+        score += (pieces & shift::pawn_attack::<C>(pawns)).count() as i16 * PROTECTED;
 
-        // Double pawns
+        // Doubled pawns
         score += (pawns & C::up().shift(pawns)).count() as i16 * DOUBLED;
 
         // Isolated pawns
@@ -546,9 +553,9 @@ impl Position {
         score
     }
 
-    pub fn evaluate_piece_square_table(&self) -> i16 {
+    pub fn evaluate_piece_square_table(&self, global: &GlobalData) -> i16 {
         let phase = self.phase();
-        let table = GlobalData::get().square();
+        let table = global.square();
         let mut score = 0;
 
         for piece in Piece::iter() {
@@ -563,7 +570,7 @@ impl Position {
     }
 
     pub fn rule_of_the_square<C: ConstColor>(&self) -> i16 {
-        const RULEOFTHESQUARE: i16 = 20;
+        const RULEOFTHESQUARE: i16 = 30;
 
         let mut score = 0;
 
@@ -589,7 +596,27 @@ impl Position {
 
         let bishops = self.board.color_kind_bb(C::color(), Kind::Bishop);
 
-        if bishops.count() == 2 { BISHOPPAIR } else { 0 }
+        if bishops.count() == 2 {
+            BISHOPPAIR
+        } else {
+            0
+        }
+    }
+
+    pub fn king_safety<C: ConstColor>(&self) -> i16 {
+        const SHIELD_0: i16 = 10;
+        const SHIELD_1: i16 = 20;
+        const SHIELD_2: i16 = 10;
+
+        let pawns = self.board.color_kind_bb(C::color(), Kind::Pawn);
+        let sides = !(Bitboard::from(File::D) | Bitboard::from(File::E) | Bitboard::from(File::F));
+        let mut king = sides & self.board.color_kind_bb(C::color(), Kind::King);
+
+        king |= Offset::<-1, 0>.shift(king) | Offset::<1, 0>.shift(king);
+
+        (king & pawns).count() as i16 * SHIELD_0
+            + (C::up().shift(king) & pawns).count() as i16 * SHIELD_1
+            + (C::up_up().shift(king) & pawns).count() as i16 * SHIELD_2
     }
 
     pub fn is_kingpawn_endgame(&self) -> bool {
@@ -602,7 +629,7 @@ impl Position {
 
     pub fn phase(&self) -> Phase {
         const MIDGAME: i16 = 3700;
-        const ENDGAME: i16 = 1500;
+        const ENDGAME: i16 = 1700;
 
         match self.all_material() {
             MIDGAME.. => Phase::Opening,
